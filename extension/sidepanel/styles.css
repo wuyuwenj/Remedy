@@ -325,6 +325,46 @@ body {
 .opt-metric { font-family: var(--font-mono); font-size: 11px; color: var(--text-muted); }
 .improvement { color: var(--accent-green); font-weight: 600; margin-left: 4px; }
 
+/* Before / After Comparison */
+.opt-comparison {
+  background: var(--bg-terminal);
+  border: 1px solid var(--border-subtle);
+  border-radius: 4px;
+  overflow: hidden;
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+
+.opt-comparison-header {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr 1fr;
+  padding: 6px 10px;
+  color: var(--text-dark);
+  font-weight: 600;
+  text-transform: uppercase;
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.opt-comparison-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr 1fr;
+  padding: 6px 10px;
+  align-items: center;
+}
+
+.opt-comparison-row:not(:last-child) {
+  border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+}
+
+.opt-comparison-label { color: var(--text-muted); font-weight: 500; }
+.opt-comparison-before { color: var(--text-dark); }
+.opt-comparison-after { color: var(--text-main); }
+.opt-comparison-change { font-weight: 600; }
+.opt-comparison-change.improved { color: var(--accent-green); }
+.opt-comparison-change.regressed { color: var(--accent-red); }
+
 /* ================= Buttons & Actions ================= */
 .action-section {
   position: sticky;

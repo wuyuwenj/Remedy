@@ -154,6 +154,7 @@ function handleEvent(event) {
     case 'suggestions':
       state.suggestions = data.suggestions || data;
       renderSuggestions();
+      showSection(els.applySection);
       break;
 
     case 'optimization':
@@ -195,6 +196,14 @@ function handleEvent(event) {
 }
 
 function finishAnalysis() {
+  // If baseline just finished and we have suggestions but no optimizations yet,
+  // auto-start testing all suggestions
+  if (state.phase !== 'optimizing' && state.suggestions.length > 0 && state.optimizations.length === 0) {
+    addLog('Auto-starting optimization tests...', 'step');
+    testSelected();
+    return;
+  }
+
   state.phase = 'done';
   setAgentStatus('done');
   els.analyzeBtn.disabled = false;
@@ -203,6 +212,13 @@ function finishAnalysis() {
       <path d="M14 8l-6-6v4H2v4h6v4l6-6z" fill="currentColor"/>
     </svg>
     <span>Re-analyze</span>`;
+  els.testSelectedBtn.disabled = false;
+  els.testSelectedBtn.innerHTML = `
+    <svg class="btn-icon" width="14" height="14" viewBox="0 0 14 14" fill="none">
+      <path d="M11.5 7A4.5 4.5 0 112.5 7a4.5 4.5 0 019 0z" stroke="currentColor" stroke-width="1.3"/>
+      <path d="M5.5 7l1.5 1.5L9 6" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/>
+    </svg>
+    Re-test`;
   addLog('Analysis complete.', 'success');
 
   // Show apply section if we have scripts or optimizations
@@ -236,23 +252,10 @@ async function testSelected() {
 
     if (!res.ok) throw new Error(`Server returned ${res.status}`);
 
-    const data = await res.json();
-
-    if (data.optimizations) {
-      state.optimizations = data.optimizations;
-      renderOptimizations();
-    }
-    if (data.postLoadScripts) {
-      state.postLoadScripts = data.postLoadScripts;
-    }
-    if (data.scripts) {
-      state.postLoadScripts = data.scripts;
-    }
-
-    finishAnalysis();
+    // Optimizations arrive via SSE stream (optimization events + complete event),
+    // not in this HTTP response. The SSE handler will call finishAnalysis().
   } catch (err) {
     showError(err.message);
-  } finally {
     els.testSelectedBtn.disabled = false;
     els.testSelectedBtn.innerHTML = `
       <svg class="btn-icon" width="14" height="14" viewBox="0 0 14 14" fill="none">
@@ -398,17 +401,32 @@ function renderOptimization(opt) {
   const row = document.createElement('div');
   row.className = 'opt-row';
 
-  let metricsHtml = '';
-  if (opt.metrics || opt.improvement) {
-    const improvements = opt.metrics || opt.improvement;
-    metricsHtml = '<div class="opt-metrics">';
-    if (typeof improvements === 'object') {
-      for (const [key, val] of Object.entries(improvements)) {
-        const sign = val > 0 ? '+' : '';
-        metricsHtml += `<span class="opt-metric">${key.toUpperCase()}: <span class="improvement">${sign}${val}</span></span>`;
-      }
+  let comparisonHtml = '';
+  if (opt.before && opt.after) {
+    const metrics = ['lcp', 'cls', 'ttfb'];
+    comparisonHtml = '<div class="opt-comparison">';
+    comparisonHtml += '<div class="opt-comparison-header"><span>Metric</span><span>Before</span><span>After</span><span>Change</span></div>';
+    for (const key of metrics) {
+      const before = opt.before[key] ?? 0;
+      const after = opt.after[key] ?? 0;
+      if (before === 0 && after === 0) continue;
+      const unit = key === 'cls' ? '' : 'ms';
+      const beforeStr = key === 'cls' ? before.toFixed(3) : Math.round(before).toLocaleString();
+      const afterStr = key === 'cls' ? after.toFixed(3) : Math.round(after).toLocaleString();
+      const diff = before > 0 ? ((before - after) / before * 100).toFixed(1) : '0';
+      const improved = parseFloat(diff) > 0;
+      const changeStr = improved ? `-${diff}%` : `+${Math.abs(parseFloat(diff))}%`;
+      const changeClass = improved ? 'improved' : parseFloat(diff) < 0 ? 'regressed' : '';
+      comparisonHtml += `<div class="opt-comparison-row">
+        <span class="opt-comparison-label">${key.toUpperCase()}</span>
+        <span class="opt-comparison-before">${beforeStr}${unit}</span>
+        <span class="opt-comparison-after">${afterStr}${unit}</span>
+        <span class="opt-comparison-change ${changeClass}">${changeStr}</span>
+      </div>`;
     }
-    metricsHtml += '</div>';
+    comparisonHtml += '</div>';
+  } else if (opt.improvement && typeof opt.improvement === 'string') {
+    comparisonHtml = `<div class="opt-metrics"><span class="opt-metric">${escapeHtml(opt.improvement)}</span></div>`;
   }
 
   row.innerHTML = `
@@ -417,7 +435,7 @@ function renderOptimization(opt) {
       <span class="opt-status ${status}">${status}</span>
     </div>
     <div class="opt-detail">${escapeHtml(opt.detail || opt.explanation || opt.description || '')}</div>
-    ${metricsHtml}`;
+    ${comparisonHtml}`;
   return row;
 }
 
