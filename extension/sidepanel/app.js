@@ -14,6 +14,8 @@ const state = {
   suggestions: [],
   optimizations: [],
   postLoadScripts: [],
+  lighthouseBefore: null,
+  lighthouseAfter: null,
   error: null,
   eventSource: null,
 };
@@ -27,6 +29,7 @@ const els = {
   agentStatus:    document.getElementById('agent-status'),
   metricsSection: document.getElementById('metrics-section'),
   metricsGrid:    document.getElementById('metrics-grid'),
+  lighthouseSection: document.getElementById('lighthouse-section'),
   suggestionsSection: document.getElementById('suggestions-section'),
   suggestionsList:document.getElementById('suggestions-list'),
   suggestionCount:document.getElementById('suggestion-count'),
@@ -154,6 +157,15 @@ function handleEvent(event) {
       addLog(data.message || data.name || 'Processing...', 'step');
       break;
 
+    case 'lighthouse':
+      if (data.phase === 'before') {
+        state.lighthouseBefore = data.score;
+      } else if (data.phase === 'after') {
+        state.lighthouseAfter = data.score;
+      }
+      renderLighthouse();
+      break;
+
     case 'metrics':
     case 'baseline':
       state.metrics = data.metrics || data;
@@ -203,6 +215,7 @@ function handleEvent(event) {
       if (data?.reportUrl && state.reportId) {
         els.viewReportLink.href = `${API_URL}${data.reportUrl}`;
       }
+      if (data?.lighthouseAfter != null) { state.lighthouseAfter = data.lighthouseAfter; renderLighthouse(); }
       finishAnalysis();
       break;
 
@@ -381,6 +394,46 @@ function renderMetric(name, value, unit) {
   return card;
 }
 
+function renderLighthouse() {
+  if (state.lighthouseBefore == null) return;
+  els.lighthouseSection.classList.remove('hidden');
+
+  const before = state.lighthouseBefore;
+  const after = state.lighthouseAfter;
+  const beforeColor = before >= 90 ? 'good' : before >= 50 ? 'warn' : 'poor';
+
+  let html = `<div class="lighthouse-card">`;
+  html += `<div class="lighthouse-gauge ${beforeColor}">`;
+  html += `<svg class="lighthouse-ring" viewBox="0 0 72 72">`;
+  html += `<circle cx="36" cy="36" r="30" fill="none" stroke="var(--border-subtle)" stroke-width="5"/>`;
+  html += `<circle cx="36" cy="36" r="30" fill="none" stroke="currentColor" stroke-width="5" stroke-dasharray="${(before / 100) * 188.5} 188.5" stroke-linecap="round" transform="rotate(-90 36 36)"/>`;
+  html += `</svg>`;
+  html += `<span class="lighthouse-score">${before}</span>`;
+  html += `</div>`;
+  html += `<div class="lighthouse-label">Lighthouse</div>`;
+
+  if (after != null) {
+    const afterColor = after >= 90 ? 'good' : after >= 50 ? 'warn' : 'poor';
+    const delta = after - before;
+    const sign = delta > 0 ? '+' : '';
+    const changeClass = delta > 0 ? 'improved' : delta < 0 ? 'regressed' : '';
+    html += `<div class="lighthouse-after">`;
+    html += `<div class="lighthouse-gauge ${afterColor}">`;
+    html += `<svg class="lighthouse-ring" viewBox="0 0 72 72">`;
+    html += `<circle cx="36" cy="36" r="30" fill="none" stroke="var(--border-subtle)" stroke-width="5"/>`;
+    html += `<circle cx="36" cy="36" r="30" fill="none" stroke="currentColor" stroke-width="5" stroke-dasharray="${(after / 100) * 188.5} 188.5" stroke-linecap="round" transform="rotate(-90 36 36)"/>`;
+    html += `</svg>`;
+    html += `<span class="lighthouse-score">${after}</span>`;
+    html += `</div>`;
+    html += `<div class="lighthouse-label">After Fixes</div>`;
+    html += `<span class="lighthouse-delta ${changeClass}">${sign}${delta}</span>`;
+    html += `</div>`;
+  }
+
+  html += `</div>`;
+  els.lighthouseSection.innerHTML = html;
+}
+
 function renderSuggestions() {
   showSection(els.suggestionsSection);
   els.suggestionsList.innerHTML = '';
@@ -556,6 +609,16 @@ function generateFullReport() {
     md += `**Baseline:** ${parts.join(' · ')}\n\n`;
   }
 
+  if (state.lighthouseBefore != null) {
+    let lhLine = `**Lighthouse Performance:** ${state.lighthouseBefore}`;
+    if (state.lighthouseAfter != null) {
+      const delta = state.lighthouseAfter - state.lighthouseBefore;
+      const sign = delta > 0 ? '+' : '';
+      lhLine += ` → ${state.lighthouseAfter} (${sign}${delta})`;
+    }
+    md += lhLine + `\n\n`;
+  }
+
   md += `---\n\n`;
 
   const fixes = state.optimizations.length > 0 ? state.optimizations : state.suggestions;
@@ -641,10 +704,14 @@ function resetUI() {
   state.suggestions = [];
   state.optimizations = [];
   state.postLoadScripts = [];
+  state.lighthouseBefore = null;
+  state.lighthouseAfter = null;
   state.error = null;
   state.reportId = null;
 
   els.agentLog.innerHTML = '';
+  els.lighthouseSection.innerHTML = '';
+  els.lighthouseSection.classList.add('hidden');
   els.metricsGrid.innerHTML = '';
   els.suggestionsList.innerHTML = '';
   els.optimizationList.innerHTML = '';

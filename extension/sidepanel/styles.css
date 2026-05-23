@@ -236,6 +236,69 @@ body {
 .metric-card.poor { border-color: rgba(239, 68, 68, 0.4); }
 .metric-card.poor .metric-value { color: var(--accent-red); }
 
+/* ================= Lighthouse Score ================= */
+.lighthouse-section {
+  margin-top: 12px;
+}
+
+.lighthouse-card {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  border-radius: 6px;
+  padding: 12px 16px;
+}
+
+.lighthouse-gauge {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.lighthouse-ring {
+  width: 56px;
+  height: 56px;
+}
+
+.lighthouse-score {
+  position: absolute;
+  font-family: var(--font-mono);
+  font-size: 18px;
+  font-weight: 700;
+}
+
+.lighthouse-gauge.good { color: var(--accent-green); }
+.lighthouse-gauge.warn { color: var(--accent-amber); }
+.lighthouse-gauge.poor { color: var(--accent-red); }
+
+.lighthouse-label {
+  font-size: 11px;
+  color: var(--text-muted);
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.lighthouse-after {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
+}
+
+.lighthouse-delta {
+  font-family: var(--font-mono);
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.lighthouse-delta.improved { color: var(--accent-green); }
+.lighthouse-delta.regressed { color: var(--accent-red); }
+
 /* ================= Suggestions ================= */
 .suggestions-list {
   display: flex;
