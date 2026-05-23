@@ -63,21 +63,29 @@ export async function runBaseline(
   url: string,
   emit: Emit
 ): Promise<{ baseline: BaselineResult; suggestions: Suggestion[]; mcpClient: Client }> {
-  emit({ type: 'status', data: `Navigating to ${url}...` });
+  emit({ type: 'status', data: 'Launching browser session...' });
 
   const mcpClient = await createMcpClient();
 
   try {
+    emit({ type: 'status', data: `Navigating to ${url}...` });
     await navigatePage(mcpClient, url);
+    emit({ type: 'status', data: 'Page loaded successfully.' });
 
     emit({ type: 'status', data: 'Running baseline performance trace...' });
     const traceResult = await startTrace(mcpClient);
+    emit({ type: 'status', data: 'Trace captured. Waiting for metrics to settle...' });
 
     // Give the auto-stop trace a moment to finish, then analyze
     await delay(2000);
 
+    emit({ type: 'status', data: 'Analyzing trace data...' });
     const analysisResult = await analyzeTrace(mcpClient);
+
+    emit({ type: 'status', data: 'Taking page screenshot...' });
     const screenshotResult = await takeScreenshot(mcpClient);
+
+    emit({ type: 'status', data: 'Capturing network requests...' });
     const networkResult = await listNetworkRequests(mcpClient);
 
     const traceText = extractText(analysisResult);
@@ -85,6 +93,7 @@ export async function runBaseline(
     const screenshotText = extractText(screenshotResult);
 
     const metrics = parseMetrics(analysisResult);
+    emit({ type: 'status', data: `Baseline metrics — LCP: ${metrics.lcp ?? 0}ms, CLS: ${metrics.cls ?? 0}, TTFB: ${metrics.ttfb ?? 0}ms` });
 
     const baseline: BaselineResult = {
       lcp: metrics.lcp ?? 0,
@@ -97,10 +106,11 @@ export async function runBaseline(
     };
 
     emit({ type: 'baseline', data: baseline });
-    emit({ type: 'status', data: 'Analyzing with Gemini...' });
+    emit({ type: 'status', data: 'Sending trace + network data to Gemini for analysis...' });
 
     const { report, suggestions } = await analyzePerformance(traceText, networkText, url);
     baseline.report = report;
+    emit({ type: 'status', data: `Gemini returned ${suggestions.length} suggestion(s).` });
 
     emit({ type: 'suggestions', data: suggestions });
 
@@ -123,24 +133,33 @@ export async function runOptimizations(
   const optimizations: OptimizationResult[] = [];
   let mcpClient: Client | null = null;
 
+  emit({ type: 'status', data: `Testing ${selectedFixes.length} fix(es)...` });
+
   try {
-    for (const fix of selectedFixes) {
-      emit({ type: 'status', data: `Testing: ${fix.name}...` });
+    for (let i = 0; i < selectedFixes.length; i++) {
+      const fix = selectedFixes[i];
+      emit({ type: 'status', data: `[${i + 1}/${selectedFixes.length}] Testing: ${fix.name}` });
 
       // Create a fresh MCP client for each optimization to avoid state leaks
       if (mcpClient) {
         await closeMcpClient(mcpClient);
       }
+      emit({ type: 'status', data: `[${i + 1}/${selectedFixes.length}] Launching fresh browser session...` });
       mcpClient = await createMcpClient();
 
       // Navigate with the fix's initScript applied
+      emit({ type: 'status', data: `[${i + 1}/${selectedFixes.length}] Navigating with fix applied...` });
       await navigatePage(mcpClient, url, fix.initScript);
 
       // Run trace with the fix applied
+      emit({ type: 'status', data: `[${i + 1}/${selectedFixes.length}] Running performance trace...` });
       await startTrace(mcpClient);
       await delay(2000);
 
+      emit({ type: 'status', data: `[${i + 1}/${selectedFixes.length}] Analyzing trace results...` });
       const analysisResult = await analyzeTrace(mcpClient);
+
+      emit({ type: 'status', data: `[${i + 1}/${selectedFixes.length}] Taking screenshot...` });
       const screenshotResult = await takeScreenshot(mcpClient);
 
       const afterMetrics = parseMetrics(analysisResult);
@@ -186,6 +205,7 @@ export async function runOptimizations(
       };
 
       optimizations.push(optResult);
+      emit({ type: 'status', data: `[${i + 1}/${selectedFixes.length}] Result: ${improvementStr}` });
       emit({ type: 'optimization', data: optResult });
     }
 
