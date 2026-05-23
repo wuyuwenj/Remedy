@@ -1,10 +1,31 @@
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
+import { resolve } from 'node:path';
+
+function buildChildEnv(): Record<string, string> {
+  const env = Object.fromEntries(
+    Object.entries(process.env).filter((entry): entry is [string, string] => typeof entry[1] === 'string')
+  );
+  const cwdParts = process.cwd().split(/[\\/]/);
+  const cacheRoot = cwdParts[cwdParts.length - 1] === 'server' ? '..' : '.';
+  env.npm_config_cache = resolve(process.cwd(), cacheRoot, '.npm-cache');
+  return env;
+}
 
 export async function createMcpClient(): Promise<Client> {
+  const mcpPackage = process.env.CHROME_DEVTOOLS_MCP_PACKAGE ?? 'chrome-devtools-mcp@latest';
   const transport = new StdioClientTransport({
     command: 'npx',
-    args: ['-y', 'chrome-devtools-mcp@latest'],
+    args: [
+      '-y',
+      mcpPackage,
+      '--headless',
+      '--isolated',
+      '--no-usage-statistics',
+      '--no-performance-crux',
+      '--redactNetworkHeaders=true',
+    ],
+    env: buildChildEnv(),
   });
 
   const client = new Client({

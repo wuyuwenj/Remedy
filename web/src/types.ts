@@ -4,6 +4,16 @@ export interface BaselineResult {
   inp: number;
   ttfb: number;
   screenshot?: string;
+  report?: AnalysisReport;
+}
+
+export interface AnalysisReport {
+  summary: string;
+  frontendComparison: string[];
+  performanceComparison: string[];
+  improveNext: string[];
+  goodEnough: string[];
+  missingEvidence: string[];
 }
 
 export interface Suggestion {
@@ -12,6 +22,8 @@ export interface Suggestion {
   impact: 'high' | 'medium' | 'low';
   expectedImprovement: string;
   explanation: string;
+  evidence?: string;
+  confidence?: 'high' | 'medium' | 'low';
   initScript: string;
   postLoadScript: string;
 }

@@ -99,7 +99,8 @@ export async function runBaseline(
     emit({ type: 'baseline', data: baseline });
     emit({ type: 'status', data: 'Analyzing with Gemini...' });
 
-    const suggestions = await analyzePerformance(traceText, networkText, url);
+    const { report, suggestions } = await analyzePerformance(traceText, networkText, url);
+    baseline.report = report;
 
     emit({ type: 'suggestions', data: suggestions });
 

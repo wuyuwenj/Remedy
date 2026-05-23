@@ -1,6 +1,11 @@
 node_modules/
 dist/
+.npm-cache/
 .env
 *.log
+*.tsbuildinfo
 .DS_Store
 **/.omc/
+snapshot.txt
+screenshot.png
+trace*.json.gz

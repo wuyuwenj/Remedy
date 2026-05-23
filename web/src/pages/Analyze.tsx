@@ -270,6 +270,41 @@ export default function Analyze() {
               />
             </div>
           )}
+
+          {baseline.report && (
+            <div
+              style={{
+                marginTop: 20,
+                background: '#111827',
+                border: '1px solid #2a2a4a',
+                borderRadius: 12,
+                padding: 20,
+              }}
+            >
+              <h3 style={{ fontSize: 16, fontWeight: 700, color: '#e2e8f0', marginBottom: 8 }}>
+                Frontend & Performance Readout
+              </h3>
+              <p style={{ fontSize: 14, color: '#cbd5e1', lineHeight: 1.6, marginBottom: 16 }}>
+                {baseline.report.summary}
+              </p>
+
+              <div
+                style={{
+                  display: 'grid',
+                  gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))',
+                  gap: 16,
+                }}
+              >
+                <ReportList title="Improve next" items={baseline.report.improveNext} color="#f59e0b" />
+                <ReportList title="Good enough" items={baseline.report.goodEnough} color="#22c55e" />
+                <ReportList
+                  title="Performance notes"
+                  items={baseline.report.performanceComparison}
+                  color="#6366f1"
+                />
+              </div>
+            </div>
+          )}
         </div>
       )}
 
@@ -500,6 +535,25 @@ export default function Analyze() {
             />
           </div>
         )}
+    </div>
+  );
+}
+
+function ReportList({ title, items, color }: { title: string; items: string[]; color: string }) {
+  if (!items || items.length === 0) {
+    return null;
+  }
+
+  return (
+    <div>
+      <div style={{ fontSize: 12, fontWeight: 800, color, textTransform: 'uppercase', marginBottom: 8 }}>
+        {title}
+      </div>
+      <ul style={{ margin: 0, paddingLeft: 18, color: '#94a3b8', fontSize: 13, lineHeight: 1.55 }}>
+        {items.slice(0, 4).map((item) => (
+          <li key={item}>{item}</li>
+        ))}
+      </ul>
     </div>
   );
 }

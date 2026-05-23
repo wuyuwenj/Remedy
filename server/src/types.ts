@@ -17,6 +17,16 @@ export interface BaselineResult {
   screenshot?: string;
   traceData?: any;
   networkData?: any;
+  report?: AnalysisReport;
+}
+
+export interface AnalysisReport {
+  summary: string;
+  frontendComparison: string[];
+  performanceComparison: string[];
+  improveNext: string[];
+  goodEnough: string[];
+  missingEvidence: string[];
 }
 
 export interface Suggestion {
@@ -25,6 +35,8 @@ export interface Suggestion {
   impact: 'high' | 'medium' | 'low';
   expectedImprovement: string;
   explanation: string;
+  evidence?: string;
+  confidence?: 'high' | 'medium' | 'low';
   initScript: string;
   postLoadScript: string;
 }
