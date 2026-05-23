@@ -365,6 +365,44 @@ body {
 .opt-comparison-change.improved { color: var(--accent-green); }
 .opt-comparison-change.regressed { color: var(--accent-red); }
 
+/* ================= Copy / Export Buttons ================= */
+.btn-copy-prompt {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  width: auto;
+  margin-top: 8px;
+  padding: 5px 10px;
+  font-size: 11px;
+  font-family: var(--font-mono);
+  color: var(--text-muted);
+  background: var(--bg-terminal);
+  border: 1px solid var(--border-subtle);
+  border-radius: 4px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.btn-copy-prompt:hover {
+  color: var(--text-main);
+  border-color: var(--border-strong);
+  background: var(--bg-surface-hover);
+}
+
+.btn-copy-prompt.copied {
+  color: var(--accent-green);
+  border-color: rgba(16, 185, 129, 0.4);
+}
+
+.export-all-btn {
+  margin-top: 12px;
+}
+
+.export-all-btn.copied {
+  color: var(--accent-green) !important;
+  border-color: rgba(16, 185, 129, 0.4) !important;
+}
+
 /* ================= Buttons & Actions ================= */
 .action-section {
   position: sticky;

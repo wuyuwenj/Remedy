@@ -8,6 +8,7 @@ import {
   listNetworkRequests,
   closeMcpClient,
   setToolCallLogger,
+  runLighthouse,
 } from '../mcp/client.js';
 import { analyzePerformance } from './gemini.js';
 
@@ -318,6 +319,17 @@ function extractImageData(value: any): string | undefined {
   return undefined;
 }
 
+function parseLighthouseScore(result: any): number | undefined {
+  const text = extractText(result);
+  const match = text.match(/performance[:\s]*(\d{1,3})/i)
+    || text.match(/score[:\s]*(\d{1,3})/i);
+  if (match) {
+    const score = parseInt(match[1], 10);
+    if (score >= 0 && score <= 100) return score;
+  }
+  return undefined;
+}
+
 export async function runBaseline(
   sessionId: string,
   url: string,
@@ -342,8 +354,14 @@ export async function runBaseline(
     const traceResult = await captureTrace(mcpClient, url, composeInitScript());
     const performanceResult = await readPerformanceMetrics(mcpClient);
 
-    emit({ type: 'status', data: 'Capturing network requests...' });
-    const networkResult = await listNetworkRequests(mcpClient);
+    emit({ type: 'status', data: 'Capturing network requests & Lighthouse audit...' });
+    const [networkResult, lighthouseResult] = await Promise.all([
+      listNetworkRequests(mcpClient),
+      runLighthouse(mcpClient, url).catch((err) => {
+        console.warn('[Baseline] Lighthouse audit failed (non-fatal):', err);
+        return null;
+      }),
+    ]);
 
     const traceText = extractText(traceResult);
     const networkText = extractText(networkResult);
@@ -373,11 +391,18 @@ export async function runBaseline(
       data: `Baseline metrics — LCP: ${metrics.lcp ?? 0}ms, CLS: ${metrics.cls ?? 0}, TTFB: ${metrics.ttfb ?? 0}ms`,
     });
 
+    const lighthouseScore = lighthouseResult ? parseLighthouseScore(lighthouseResult) : undefined;
+    if (lighthouseScore != null) {
+      logStep('Baseline', sessionId, `Lighthouse performance score: ${lighthouseScore}`);
+      emit({ type: 'lighthouse', data: { phase: 'before', score: lighthouseScore } });
+    }
+
     const baseline: BaselineResult = {
       lcp: metrics.lcp ?? 0,
       cls: metrics.cls ?? 0,
       inp: metrics.inp ?? 0,
       ttfb: metrics.ttfb ?? 0,
+      lighthouseScore,
       screenshot,
       traceData: `${traceText}\n\n=== PERFORMANCE API METRICS ===\n${extractText(performanceResult)}`,
       networkData: networkText,
@@ -539,6 +564,26 @@ export async function runOptimizations(
       emit({ type: 'optimization', data: optResult });
     }
 
+    // Run Lighthouse with all fix initScripts combined for an "after" score.
+    let lighthouseAfter: number | undefined;
+    const allInitScripts = selectedFixes.map((f) => f.initScript).filter(Boolean);
+    if (allInitScripts.length > 0) {
+      emit({ type: 'status', data: 'Running Lighthouse audit with fixes applied...' });
+      try {
+        if (mcpClient) await closeMcpClient(mcpClient);
+        mcpClient = await createMcpClient();
+        const combinedInit = allInitScripts.join(';\n');
+        const lhResult = await runLighthouse(mcpClient, url, combinedInit);
+        lighthouseAfter = parseLighthouseScore(lhResult);
+        if (lighthouseAfter != null) {
+          logStep('Optimize', sessionId, `Lighthouse after: ${lighthouseAfter}`);
+          emit({ type: 'lighthouse', data: { phase: 'after', score: lighthouseAfter } });
+        }
+      } catch (err) {
+        console.warn('[Optimize] Lighthouse after-audit failed (non-fatal):', err);
+      }
+    }
+
     // Combined LCP improvement vs each fix's paired in-session control.
     let totalLcpImprovement = 0;
     for (const opt of optimizations) {
@@ -550,6 +595,9 @@ export async function runOptimizations(
     const totalImprovement = totalLcpImprovement > 0
       ? `Estimated LCP improvement: -${totalLcpImprovement.toFixed(1)}% (combined, vs paired in-session controls)`
       : 'No measurable improvement (within run-to-run noise)';
+
+    emit({ type: 'complete', data: { optimizations, totalImprovement, lighthouseAfter } });
+
 
     return optimizations;
   } finally {

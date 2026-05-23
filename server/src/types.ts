@@ -14,6 +14,7 @@ export interface BaselineResult {
   cls: number;
   inp: number;
   ttfb: number;
+  lighthouseScore?: number;
   screenshot?: string;
   traceData?: any;
   networkData?: any;
@@ -56,6 +57,6 @@ export interface OptimizationResult {
 export interface SSEEvent {
   // 'done' signals the baseline phase finished (metrics + suggestions ready,
   // awaiting fix selection); 'complete' signals the optimization phase finished.
-  type: 'status' | 'baseline' | 'suggestions' | 'optimization' | 'done' | 'complete' | 'error';
+  type: 'status' | 'baseline' | 'lighthouse' | 'suggestions' | 'optimization' | 'done' | 'complete' | 'error';
   data: any;
 }

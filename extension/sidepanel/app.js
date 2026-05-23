@@ -33,6 +33,7 @@ const els = {
   testSelectedBtn:document.getElementById('test-selected-btn'),
   optimizationSection: document.getElementById('optimization-section'),
   optimizationList:document.getElementById('optimization-list'),
+  exportAllBtn:   document.getElementById('export-all-btn'),
   applySection:   document.getElementById('apply-section'),
   applyFixesBtn:  document.getElementById('apply-fixes-btn'),
   viewReportLink: document.getElementById('view-report-link'),
@@ -61,6 +62,7 @@ function init() {
   els.testSelectedBtn.addEventListener('click', testSelected);
   els.applyFixesBtn.addEventListener('click', applyFixes);
   els.retryBtn.addEventListener('click', startAnalysis);
+  els.exportAllBtn.addEventListener('click', () => copyToClipboard(generateFullReport(), els.exportAllBtn));
 }
 
 // ---- Analysis Flow ----
@@ -416,6 +418,10 @@ function renderOptimizations() {
   for (const opt of state.optimizations) {
     els.optimizationList.appendChild(renderOptimization(opt));
   }
+
+  if (state.optimizations.length > 0) {
+    els.exportAllBtn.classList.remove('hidden');
+  }
 }
 
 function renderOptimization(opt) {
@@ -458,7 +464,18 @@ function renderOptimization(opt) {
       <span class="opt-status ${status}">${status}</span>
     </div>
     <div class="opt-detail">${escapeHtml(opt.detail || opt.explanation || opt.description || '')}</div>
-    ${comparisonHtml}`;
+    ${comparisonHtml}
+    <button class="btn-copy-prompt">
+      <svg class="btn-icon" width="12" height="12" viewBox="0 0 12 12" fill="none">
+        <rect x="4" y="4" width="6.5" height="7" rx="1" stroke="currentColor" stroke-width="1.1"/>
+        <path d="M8 4V2.5A1.5 1.5 0 006.5 1h-4A1.5 1.5 0 001 2.5v5A1.5 1.5 0 002.5 9H4" stroke="currentColor" stroke-width="1.1"/>
+      </svg>
+      Copy as Prompt
+    </button>`;
+
+  const copyBtn = row.querySelector('.btn-copy-prompt');
+  copyBtn.addEventListener('click', () => copyToClipboard(generateFixPrompt(opt), copyBtn));
+
   return row;
 }
 
@@ -481,6 +498,90 @@ function addLog(message, level = 'info') {
 function setAgentStatus(status) {
   els.agentStatus.textContent = status;
   els.agentStatus.className = `status-badge ${status}`;
+}
+
+// ---- Export / Copy as Prompt ----
+
+function generateFixPrompt(opt) {
+  let md = `## Performance Fix: ${opt.name || opt.title || 'Untitled'}\n\n`;
+  md += `**Problem:** ${opt.explanation || opt.description || opt.detail || 'N/A'}\n\n`;
+
+  if (opt.improvement) {
+    md += `**Impact:** ${opt.improvement}\n\n`;
+  }
+
+  if (opt.before && opt.after) {
+    md += `**Verified metrics:**\n`;
+    md += `| Metric | Before | After | Change |\n`;
+    md += `|--------|--------|-------|--------|\n`;
+    for (const key of ['lcp', 'cls', 'ttfb']) {
+      const before = opt.before[key] ?? 0;
+      const after = opt.after[key] ?? 0;
+      if (before === 0 && after === 0) continue;
+      const unit = key === 'cls' ? '' : 'ms';
+      const bStr = key === 'cls' ? before.toFixed(3) : Math.round(before) + unit;
+      const aStr = key === 'cls' ? after.toFixed(3) : Math.round(after) + unit;
+      const diff = before > 0 ? ((before - after) / before * 100).toFixed(1) : '0';
+      const sign = parseFloat(diff) > 0 ? '-' : '+';
+      md += `| ${key.toUpperCase()} | ${bStr} | ${aStr} | ${sign}${Math.abs(parseFloat(diff))}% |\n`;
+    }
+    md += `\n`;
+  }
+
+  if (opt.initScript) {
+    md += `**Init script** (runs before page scripts):\n\`\`\`js\n${opt.initScript}\n\`\`\`\n\n`;
+  }
+  if (opt.postLoadScript) {
+    md += `**Post-load script** (runs after page load):\n\`\`\`js\n${opt.postLoadScript}\n\`\`\`\n\n`;
+  }
+
+  md += `**Implement in your codebase:**\nThe scripts above are proof-of-concept injections that verified the improvement. `;
+  md += `Adapt this optimization to your framework and source code — the intent matters more than the exact DOM manipulation.\n`;
+
+  return md;
+}
+
+function generateFullReport() {
+  let md = `# Remedy Performance Report\n\n`;
+  md += `**URL:** ${state.url}\n`;
+  md += `**Date:** ${new Date().toISOString().slice(0, 10)}\n\n`;
+
+  if (state.metrics && Object.keys(state.metrics).length > 0) {
+    const m = state.metrics;
+    const parts = [];
+    if (m.lcp != null) parts.push(`LCP ${Math.round(m.lcp)}ms`);
+    if (m.cls != null) parts.push(`CLS ${Number(m.cls).toFixed(3)}`);
+    if (m.inp != null) parts.push(`INP ${Math.round(m.inp)}ms`);
+    if (m.ttfb != null) parts.push(`TTFB ${Math.round(m.ttfb)}ms`);
+    md += `**Baseline:** ${parts.join(' · ')}\n\n`;
+  }
+
+  md += `---\n\n`;
+
+  const fixes = state.optimizations.length > 0 ? state.optimizations : state.suggestions;
+  for (let i = 0; i < fixes.length; i++) {
+    md += generateFixPrompt(fixes[i]);
+    if (i < fixes.length - 1) md += `---\n\n`;
+  }
+
+  return md;
+}
+
+async function copyToClipboard(text, buttonEl) {
+  try {
+    await navigator.clipboard.writeText(text);
+    const original = buttonEl.innerHTML;
+    buttonEl.innerHTML = `<svg class="btn-icon" width="12" height="12" viewBox="0 0 12 12" fill="none">
+      <path d="M10 3L4.5 8.5 2 6" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+    </svg> Copied!`;
+    buttonEl.classList.add('copied');
+    setTimeout(() => {
+      buttonEl.innerHTML = original;
+      buttonEl.classList.remove('copied');
+    }, 2000);
+  } catch {
+    addLog('Failed to copy to clipboard.', 'error');
+  }
 }
 
 // ---- Helpers ----
@@ -549,6 +650,7 @@ function resetUI() {
   els.optimizationList.innerHTML = '';
   els.suggestionCount.textContent = '0';
   els.testSelectedBtn.classList.add('hidden');
+  els.exportAllBtn.classList.add('hidden');
 
   hideSection(els.agentLogSection);
   hideSection(els.metricsSection);

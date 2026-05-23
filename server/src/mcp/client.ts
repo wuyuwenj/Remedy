@@ -127,6 +127,13 @@ export async function listNetworkRequests(client: Client): Promise<any> {
   return callTool(client, 'list_network_requests', {});
 }
 
+export async function runLighthouse(client: Client, url: string, initScript?: string): Promise<any> {
+  const navArgs: Record<string, unknown> = { url, type: 'url' };
+  if (initScript) navArgs.initScript = initScript;
+  await callTool(client, 'navigate_page', navArgs);
+  return callTool(client, 'lighthouse_audit', { url });
+}
+
 export async function closeMcpClient(client: Client): Promise<void> {
   try {
     await client.close();

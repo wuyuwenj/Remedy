@@ -71,7 +71,10 @@ chrome.webNavigation.onCommitted.addListener((details) => {
       target: { tabId: details.tabId },
       func: (code) => {
         try {
-          new Function(code)();
+          const s = document.createElement('script');
+          s.textContent = code;
+          (document.head || document.documentElement).appendChild(s);
+          s.remove();
         } catch (e) {
           console.error('[Remedy initScript]', e);
         }
@@ -100,7 +103,10 @@ async function injectScripts(tabId, scripts) {
       target: { tabId },
       func: (code) => {
         try {
-          new Function(code)();
+          const s = document.createElement('script');
+          s.textContent = code;
+          (document.head || document.documentElement).appendChild(s);
+          s.remove();
         } catch (e) {
           console.error('[Remedy postLoadScript]', e);
         }
