@@ -270,32 +270,30 @@ function getSelectedFixIds() {
 
 // ---- Apply Fixes ----
 async function applyFixes() {
-  let scripts = state.postLoadScripts;
-
-  if (scripts.length === 0) {
-    scripts = state.optimizations
-      .map((o) => o.postLoadScript)
-      .filter(Boolean);
-  }
-
-  if (scripts.length === 0) {
+  // Gather fix sources: optimizations first, then selected suggestions
+  let sources = state.optimizations;
+  if (sources.length === 0) {
     const selectedIds = new Set(getSelectedFixIds());
-    scripts = state.suggestions
-      .filter((s) => selectedIds.has(s.id))
-      .map((s) => s.postLoadScript)
-      .filter(Boolean);
+    sources = state.suggestions.filter((s) => selectedIds.has(s.id));
   }
 
-  if (scripts.length === 0) {
+  const initScripts = sources.map((s) => s.initScript).filter(Boolean);
+  const postLoadScripts = state.postLoadScripts.length > 0
+    ? state.postLoadScripts
+    : sources.map((s) => s.postLoadScript).filter(Boolean);
+
+  if (initScripts.length === 0 && postLoadScripts.length === 0) {
     addLog('No fix scripts available to apply.', 'warning');
     return;
   }
+
+  addLog(`Applying ${initScripts.length} init script(s) + ${postLoadScripts.length} post-load script(s)...`, 'step');
 
   els.applyFixesBtn.disabled = true;
   els.applyFixesBtn.innerHTML = '<span class="spinner"></span> Applying...';
 
   chrome.runtime.sendMessage(
-    { type: 'APPLY_FIXES', scripts },
+    { type: 'APPLY_FIXES', initScripts, postLoadScripts },
     (response) => {
       els.applyFixesBtn.disabled = false;
       if (response?.success) {
@@ -305,7 +303,12 @@ async function applyFixes() {
           </svg>
           Fixes Applied!`;
         els.applyFixesBtn.style.background = 'linear-gradient(135deg, #16a34a, #15803d)';
-        addLog('Fixes applied to page successfully.', 'success');
+        if (response?.reloading) {
+          addLog('Fixes registered — page is reloading with initScripts applied before page scripts.', 'success');
+        } else {
+          addLog('Fixes applied to page successfully.', 'success');
+        }
+        addLog('Fixes will persist across refreshes. Use "Clear Fixes" to remove.', 'step');
       } else {
         els.applyFixesBtn.innerHTML = `
           <svg class="btn-icon" width="16" height="16" viewBox="0 0 16 16" fill="none">

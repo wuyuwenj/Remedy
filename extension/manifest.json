@@ -3,7 +3,7 @@
   "name": "Remedy",
   "description": "Fix your website's performance with AI",
   "version": "1.0.0",
-  "permissions": ["activeTab", "tabs", "scripting", "sidePanel"],
+  "permissions": ["activeTab", "tabs", "scripting", "sidePanel", "webNavigation"],
   "host_permissions": ["<all_urls>"],
   "side_panel": {
     "default_path": "sidepanel/index.html"
