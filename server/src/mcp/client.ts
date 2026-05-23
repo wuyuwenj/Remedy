@@ -103,7 +103,7 @@ export async function captureTrace(
   await callTool(client, 'navigate_page', { url: 'about:blank', type: 'url' });
   await callTool(client, 'performance_start_trace', { reload: false, autoStop: false });
 
-  const navArgs: Record<string, unknown> = { url, type: 'url', timeout: navTimeoutMs };
+  const navArgs: Record<string, unknown> = { url, type: 'url', timeout: navTimeoutMs, ignoreCache: true };
   if (initScript) {
     navArgs.initScript = initScript;
   }
@@ -113,6 +113,10 @@ export async function captureTrace(
   await new Promise((resolve) => setTimeout(resolve, TRACE_SETTLE_MS));
 
   return callTool(client, 'performance_stop_trace', {});
+}
+
+export async function evaluateScript(client: Client, functionDeclaration: string): Promise<any> {
+  return callTool(client, 'evaluate_script', { function: functionDeclaration });
 }
 
 export async function takeScreenshot(client: Client): Promise<any> {

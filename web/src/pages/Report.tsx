@@ -102,14 +102,24 @@ export default function Report() {
             <span className="font-semibold tracking-tight">Remedy</span>
           </a>
 
-          <button
-            onClick={handleShare}
-            className="inline-flex items-center gap-2 text-sm font-medium rounded-md px-4 py-2 text-[color:var(--primary-foreground)] transition-transform active:scale-[0.98]"
-            style={{ background: 'var(--gradient-cyan)' }}
-          >
-            <Share2 className="size-4" />
-            {copied ? 'Copied!' : 'Share'}
-          </button>
+          <div className="flex items-center gap-2">
+            <a
+              href={`/api/report/${reportId}/html`}
+              target="_blank"
+              rel="noreferrer"
+              className="inline-flex items-center gap-2 text-sm font-medium rounded-md px-4 py-2 text-foreground border border-white/10 bg-white/[0.04] hover:bg-white/[0.08] transition-colors"
+            >
+              Full HTML Report
+            </a>
+            <button
+              onClick={handleShare}
+              className="inline-flex items-center gap-2 text-sm font-medium rounded-md px-4 py-2 text-[color:var(--primary-foreground)] transition-transform active:scale-[0.98]"
+              style={{ background: 'var(--gradient-cyan)' }}
+            >
+              <Share2 className="size-4" />
+              {copied ? 'Copied!' : 'Share'}
+            </button>
+          </div>
         </div>
       </header>
 

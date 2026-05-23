@@ -78,6 +78,16 @@ router.post('/apply/:id', async (req: Request, res: Response) => {
       } catch (err) {
         console.warn('[Apply] Failed to save report to Supabase:', err);
       }
+
+      emit({
+        type: 'complete',
+        data: {
+          optimizations,
+          totalImprovement: session.totalImprovement,
+          metrics: session.baseline,
+          reportUrl: `/report/${id}/html`,
+        },
+      });
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       session.status = 'error';

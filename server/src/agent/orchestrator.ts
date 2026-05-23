@@ -3,6 +3,7 @@ import type { BaselineResult, Suggestion, OptimizationResult, SSEEvent } from '.
 import {
   createMcpClient,
   captureTrace,
+  evaluateScript,
   takeScreenshot,
   listNetworkRequests,
   closeMcpClient,
@@ -12,13 +13,80 @@ import { analyzePerformance } from './gemini.js';
 
 type Emit = (event: SSEEvent) => void;
 
+const REMEDY_VITALS_INIT_SCRIPT = `
+(() => {
+  window.__remedyVitals = {
+    lcp: undefined,
+    cls: 0,
+    inp: undefined,
+    lcpEntries: [],
+    clsEntries: []
+  };
+
+  try {
+    const lcpObserver = new PerformanceObserver((list) => {
+      const entries = list.getEntries();
+      const last = entries[entries.length - 1];
+      if (last) {
+        window.__remedyVitals.lcp = last.startTime;
+        window.__remedyVitals.lcpEntries.push({
+          startTime: last.startTime,
+          renderTime: last.renderTime,
+          loadTime: last.loadTime,
+          size: last.size,
+          url: last.url || '',
+          element: last.element ? last.element.tagName : ''
+        });
+      }
+    });
+    lcpObserver.observe({ type: 'largest-contentful-paint', buffered: true });
+  } catch {}
+
+  try {
+    const clsObserver = new PerformanceObserver((list) => {
+      for (const entry of list.getEntries()) {
+        if (!entry.hadRecentInput) {
+          window.__remedyVitals.cls += entry.value;
+          window.__remedyVitals.clsEntries.push({
+            startTime: entry.startTime,
+            value: entry.value
+          });
+        }
+      }
+    });
+    clsObserver.observe({ type: 'layout-shift', buffered: true });
+  } catch {}
+
+  try {
+    const eventObserver = new PerformanceObserver((list) => {
+      for (const entry of list.getEntries()) {
+        const duration = entry.duration || 0;
+        if (duration > (window.__remedyVitals.inp || 0)) {
+          window.__remedyVitals.inp = duration;
+        }
+      }
+    });
+    eventObserver.observe({ type: 'event', buffered: true, durationThreshold: 16 });
+  } catch {}
+})();
+`;
+
+function composeInitScript(fixInitScript?: string): string {
+  return [REMEDY_VITALS_INIT_SCRIPT, fixInitScript?.trim()].filter(Boolean).join('\n;\n');
+}
+
 // Tagged logger so concurrent runs are distinguishable in the backend console.
 function logStep(scope: string, sessionId: string, msg: string): void {
   console.log(`[${scope} ${sessionId.slice(0, 8)}] ${msg}`);
 }
 
-function parseMetrics(traceResult: any): Partial<BaselineResult> {
+function parseMetrics(traceResult: any, performanceResult?: any): Partial<BaselineResult> {
   const metrics: Partial<BaselineResult> = {};
+  const performanceMetrics = parsePerformanceMetrics(performanceResult);
+  if (performanceMetrics.lcp != null) metrics.lcp = performanceMetrics.lcp;
+  if (performanceMetrics.cls != null) metrics.cls = performanceMetrics.cls;
+  if (performanceMetrics.inp != null) metrics.inp = performanceMetrics.inp;
+  if (performanceMetrics.ttfb != null) metrics.ttfb = performanceMetrics.ttfb;
 
   // The trace result comes back from MCP as { content: [...] }
   // Extract text content and parse metrics from it
@@ -31,22 +99,22 @@ function parseMetrics(traceResult: any): Partial<BaselineResult> {
 
   // Try to parse LCP, CLS, INP, TTFB from the trace analysis text
   const lcpMatch = text.match(/LCP[:\s]*([0-9.,]+)\s*(ms|s)/i);
-  if (lcpMatch) {
+  if (metrics.lcp == null && lcpMatch) {
     metrics.lcp = lcpMatch[2] === 's' ? num(lcpMatch[1]) * 1000 : num(lcpMatch[1]);
   }
 
   const clsMatch = text.match(/CLS[:\s]*([0-9.]+)/i);
-  if (clsMatch) {
+  if (metrics.cls == null && clsMatch) {
     metrics.cls = parseFloat(clsMatch[1]);
   }
 
   const inpMatch = text.match(/INP[:\s]*([0-9.,]+)\s*(ms|s)/i);
-  if (inpMatch) {
+  if (metrics.inp == null && inpMatch) {
     metrics.inp = inpMatch[2] === 's' ? num(inpMatch[1]) * 1000 : num(inpMatch[1]);
   }
 
   const ttfbMatch = text.match(/TTFB[:\s]*([0-9.,]+)\s*(ms|s)/i);
-  if (ttfbMatch) {
+  if (metrics.ttfb == null && ttfbMatch) {
     metrics.ttfb = ttfbMatch[2] === 's' ? num(ttfbMatch[1]) * 1000 : num(ttfbMatch[1]);
   }
 
@@ -57,6 +125,133 @@ function parseMetrics(traceResult: any): Partial<BaselineResult> {
   }
 
   return metrics;
+}
+
+function parsePerformanceMetrics(result: any): Partial<BaselineResult> {
+  const text = extractText(result);
+  if (!text) return {};
+
+  const match = text.match(/\{[\s\S]*\}/);
+  if (!match) return {};
+
+  try {
+    const parsed = JSON.parse(match[0]);
+    return {
+      lcp: numberOrUndefined(parsed.lcp),
+      cls: numberOrUndefined(parsed.cls),
+      inp: numberOrUndefined(parsed.inp),
+      ttfb: numberOrUndefined(parsed.ttfb),
+    };
+  } catch {
+    return {};
+  }
+}
+
+function numberOrUndefined(value: unknown): number | undefined {
+  return typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : undefined;
+}
+
+function metricRating(metric: keyof Pick<BaselineResult, 'lcp' | 'cls' | 'inp' | 'ttfb'>, value: number | undefined): 'good' | 'needs-improvement' | 'poor' | 'unknown' {
+  if (value == null || !Number.isFinite(value) || value <= 0) return 'unknown';
+  const thresholds = {
+    lcp: { good: 2500, poor: 4000 },
+    cls: { good: 0.1, poor: 0.25 },
+    inp: { good: 200, poor: 500 },
+    ttfb: { good: 800, poor: 1800 },
+  }[metric];
+  if (value <= thresholds.good) return 'good';
+  if (value >= thresholds.poor) return 'poor';
+  return 'needs-improvement';
+}
+
+function formatMetricForOverlay(metric: keyof Pick<BaselineResult, 'lcp' | 'cls' | 'inp' | 'ttfb'>, value: number | undefined): string {
+  if (value == null || !Number.isFinite(value) || value <= 0) return 'n/a';
+  if (metric === 'cls') return value.toFixed(3);
+  return value >= 1000 ? `${(value / 1000).toFixed(2)}s` : `${Math.round(value)}ms`;
+}
+
+function statsOverlayScript(metrics: Partial<BaselineResult>, label: string): string {
+  const rows = (['lcp', 'cls', 'inp', 'ttfb'] as const).map((key) => ({
+    label: key.toUpperCase(),
+    display: formatMetricForOverlay(key, metrics[key]),
+    rating: metricRating(key, metrics[key]),
+  }));
+  const payload = JSON.stringify({ title: label, rows });
+  return `() => {
+    const data = ${payload};
+    document.querySelectorAll('[data-remedy-stats]').forEach((el) => el.remove());
+    const colors = { good: '#10b981', 'needs-improvement': '#f59e0b', poor: '#ef4444', unknown: '#a1a1aa' };
+    const panel = document.createElement('div');
+    panel.setAttribute('data-remedy-stats', 'true');
+    panel.style.cssText = [
+      'position:fixed',
+      'top:12px',
+      'left:12px',
+      'z-index:2147483647',
+      'background:rgba(9,9,11,.94)',
+      'color:#fafafa',
+      'font:12px/1.35 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace',
+      'border:1px solid rgba(255,255,255,.14)',
+      'border-radius:6px',
+      'padding:10px 12px',
+      'box-shadow:0 12px 34px rgba(0,0,0,.45)',
+      'min-width:196px',
+      'backdrop-filter:blur(6px)'
+    ].join(';');
+    const head = document.createElement('div');
+    head.textContent = 'Core Web Vitals - ' + data.title;
+    head.style.cssText = 'font-weight:700;margin-bottom:8px;font-size:10px;letter-spacing:.05em;text-transform:uppercase;color:#a1a1aa;';
+    panel.appendChild(head);
+    data.rows.forEach((row) => {
+      const line = document.createElement('div');
+      line.style.cssText = 'display:flex;align-items:center;justify-content:space-between;gap:18px;padding:3px 0;';
+      const name = document.createElement('span');
+      name.textContent = row.label;
+      name.style.color = '#d4d4d8';
+      const value = document.createElement('span');
+      value.textContent = row.display;
+      value.style.cssText = 'font-weight:700;color:' + (colors[row.rating] || colors.unknown) + ';';
+      line.appendChild(name);
+      line.appendChild(value);
+      panel.appendChild(line);
+    });
+    (document.body || document.documentElement).appendChild(panel);
+    return { ok: true, rows: data.rows.length };
+  }`;
+}
+
+async function captureScreenshotWithOverlay(
+  client: Client,
+  metrics: Partial<BaselineResult>,
+  label: string
+): Promise<string> {
+  await evaluateScript(client, statsOverlayScript(metrics, label));
+  await new Promise((resolve) => setTimeout(resolve, 150));
+  return extractScreenshot(await takeScreenshot(client));
+}
+
+async function readPerformanceMetrics(client: Client): Promise<any> {
+  return evaluateScript(client, `() => {
+    const nav = performance.getEntriesByType('navigation')[0];
+    const paints = Object.fromEntries(
+      performance.getEntriesByType('paint').map((entry) => [entry.name, entry.startTime])
+    );
+    const vitals = window.__remedyVitals || {};
+    return {
+      source: 'performance-api',
+      lcp: typeof vitals.lcp === 'number' ? vitals.lcp : undefined,
+      cls: typeof vitals.cls === 'number' ? vitals.cls : undefined,
+      inp: typeof vitals.inp === 'number' ? vitals.inp : undefined,
+      ttfb: nav ? nav.responseStart : undefined,
+      fcp: paints['first-contentful-paint'],
+      load: nav && nav.loadEventEnd > 0 ? nav.loadEventEnd : undefined,
+      resourceCount: performance.getEntriesByType('resource').length,
+      transferSize: nav ? nav.transferSize : undefined,
+      encodedBodySize: nav ? nav.encodedBodySize : undefined,
+      lcpEntries: vitals.lcpEntries || [],
+      clsEntries: vitals.clsEntries || []
+    };
+  }`);
 }
 
 function extractText(result: any): string {
@@ -71,6 +266,56 @@ function extractText(result: any): string {
     if (typeof result.content === 'string') return result.content;
   }
   return JSON.stringify(result);
+}
+
+function extractScreenshot(result: any): string {
+  const image = extractImageData(result);
+  if (image) {
+    return image;
+  }
+
+  const text = extractText(result).trim();
+  const dataUriMatch = text.match(/data:image\/[a-zA-Z0-9.+-]+;base64,[A-Za-z0-9+/=]+/);
+  if (dataUriMatch) {
+    return dataUriMatch[0];
+  }
+
+  const base64Match = text.match(/[A-Za-z0-9+/]{200,}={0,2}/);
+  if (base64Match) {
+    return base64Match[0];
+  }
+
+  console.warn('[Screenshot] No image data found in take_screenshot result. Text preview:', text.slice(0, 200));
+  return '';
+}
+
+function extractImageData(value: any): string | undefined {
+  if (!value) return undefined;
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      const found = extractImageData(item);
+      if (found) return found;
+    }
+    return undefined;
+  }
+  if (typeof value !== 'object') return undefined;
+
+  if (typeof value.data === 'string' && typeof value.mimeType === 'string' && value.mimeType.startsWith('image/')) {
+    return `data:${value.mimeType};base64,${value.data}`;
+  }
+  if (typeof value.data === 'string' && value.type === 'image') {
+    return `data:${value.mimeType || 'image/png'};base64,${value.data}`;
+  }
+  if (typeof value.imageData === 'string') {
+    return value.imageData.startsWith('data:') ? value.imageData : `data:image/png;base64,${value.imageData}`;
+  }
+
+  for (const key of ['content', 'structuredContent', 'result'] as const) {
+    const found = extractImageData(value[key]);
+    if (found) return found;
+  }
+
+  return undefined;
 }
 
 export async function runBaseline(
@@ -94,19 +339,16 @@ export async function runBaseline(
     // captureTrace drives the load itself so heavy pages that exceed the trace
     // tool's hardcoded 10s reload still get captured. The summary (with metrics)
     // is appended to this result — the data source parseMetrics needs.
-    const traceResult = await captureTrace(mcpClient, url);
-
-    emit({ type: 'status', data: 'Taking page screenshot...' });
-    const screenshotResult = await takeScreenshot(mcpClient);
+    const traceResult = await captureTrace(mcpClient, url, composeInitScript());
+    const performanceResult = await readPerformanceMetrics(mcpClient);
 
     emit({ type: 'status', data: 'Capturing network requests...' });
     const networkResult = await listNetworkRequests(mcpClient);
 
     const traceText = extractText(traceResult);
     const networkText = extractText(networkResult);
-    const screenshotText = extractText(screenshotResult);
-
-    const metrics = parseMetrics(traceResult);
+    const metrics = parseMetrics(traceResult, performanceResult);
+    const screenshot = await captureScreenshotWithOverlay(mcpClient, metrics, 'Original');
     logStep(
       'Baseline',
       sessionId,
@@ -136,8 +378,8 @@ export async function runBaseline(
       cls: metrics.cls ?? 0,
       inp: metrics.inp ?? 0,
       ttfb: metrics.ttfb ?? 0,
-      screenshot: screenshotText,
-      traceData: traceText,
+      screenshot,
+      traceData: `${traceText}\n\n=== PERFORMANCE API METRICS ===\n${extractText(performanceResult)}`,
       networkData: networkText,
     };
 
@@ -181,10 +423,11 @@ async function measureMedian(
   const runs: Partial<BaselineResult>[] = [];
   let screenshot = '';
   for (let i = 0; i < samples; i++) {
-    const traceResult = await captureTrace(client, url, initScript);
-    runs.push(parseMetrics(traceResult));
+    const traceResult = await captureTrace(client, url, composeInitScript(initScript));
+    const performanceResult = await readPerformanceMetrics(client);
+    runs.push(parseMetrics(traceResult, performanceResult));
     if (i === samples - 1) {
-      screenshot = extractText(await takeScreenshot(client));
+      screenshot = await captureScreenshotWithOverlay(client, runs[runs.length - 1], initScript ? 'Treatment' : 'Original');
     }
   }
   return {
@@ -217,34 +460,36 @@ export async function runOptimizations(
 
   emit({
     type: 'status',
-    data: `Testing ${selectedFixes.length} fix(es) — median of ${OPTIMIZATION_SAMPLES} runs each...`,
+    data: `Testing ${selectedFixes.length} fix(es) — paired control/treatment, median of ${OPTIMIZATION_SAMPLES} runs each...`,
   });
 
   try {
-    // Measure an in-session control (no fix) under the same network window as
-    // the treatments. The saved baseline can be minutes stale, so comparing
-    // against it conflates the fix's effect with network drift — which is what
-    // produced "after is slower than before" results.
-    emit({ type: 'status', data: `Measuring control (no fix, ${OPTIMIZATION_SAMPLES} runs)...` });
-    mcpClient = await createMcpClient();
-    const control = await measureMedian(mcpClient, url, undefined, OPTIMIZATION_SAMPLES);
-    const before = {
-      lcp: control.metrics.lcp ?? baselineMetrics.lcp,
-      cls: control.metrics.cls ?? baselineMetrics.cls,
-      inp: control.metrics.inp ?? baselineMetrics.inp,
-      ttfb: control.metrics.ttfb ?? baselineMetrics.ttfb,
-    };
-    logStep('Optimize', sessionId, `control medians: LCP=${before.lcp} CLS=${before.cls} TTFB=${before.ttfb}`);
-
     for (let i = 0; i < selectedFixes.length; i++) {
       const fix = selectedFixes[i];
       logStep('Optimize', sessionId, `testing fix ${fix.id}: ${fix.name}`);
       emit({
         type: 'status',
-        data: `[${i + 1}/${selectedFixes.length}] Testing: ${fix.name} (${OPTIMIZATION_SAMPLES} runs)`,
+        data: `[${i + 1}/${selectedFixes.length}] Measuring original control for: ${fix.name}`,
       });
 
-      // Fresh MCP client per fix to avoid state leaks between runs.
+      if (mcpClient) {
+        await closeMcpClient(mcpClient);
+      }
+      mcpClient = await createMcpClient();
+      const control = await measureMedian(mcpClient, url, undefined, OPTIMIZATION_SAMPLES);
+      const before = {
+        lcp: control.metrics.lcp ?? baselineMetrics.lcp,
+        cls: control.metrics.cls ?? baselineMetrics.cls,
+        inp: control.metrics.inp ?? baselineMetrics.inp,
+        ttfb: control.metrics.ttfb ?? baselineMetrics.ttfb,
+      };
+      logStep('Optimize', sessionId, `fix ${fix.id} control medians: LCP=${before.lcp} CLS=${before.cls} TTFB=${before.ttfb}`);
+
+      emit({
+        type: 'status',
+        data: `[${i + 1}/${selectedFixes.length}] Measuring treatment for: ${fix.name}`,
+      });
+
       await closeMcpClient(mcpClient);
       mcpClient = await createMcpClient();
 
@@ -294,18 +539,17 @@ export async function runOptimizations(
       emit({ type: 'optimization', data: optResult });
     }
 
-    // Combined LCP improvement vs the in-session control.
+    // Combined LCP improvement vs each fix's paired in-session control.
     let totalLcpImprovement = 0;
     for (const opt of optimizations) {
-      if (before.lcp > 0 && opt.after.lcp != null) {
-        totalLcpImprovement += ((before.lcp - opt.after.lcp) / before.lcp) * 100;
+      const beforeLcp = opt.before.lcp;
+      if (beforeLcp != null && beforeLcp > 0 && opt.after.lcp != null) {
+        totalLcpImprovement += ((beforeLcp - opt.after.lcp) / beforeLcp) * 100;
       }
     }
     const totalImprovement = totalLcpImprovement > 0
-      ? `Estimated LCP improvement: -${totalLcpImprovement.toFixed(1)}% (combined, vs in-session control)`
+      ? `Estimated LCP improvement: -${totalLcpImprovement.toFixed(1)}% (combined, vs paired in-session controls)`
       : 'No measurable improvement (within run-to-run noise)';
-
-    emit({ type: 'complete', data: { optimizations, totalImprovement } });
 
     return optimizations;
   } finally {

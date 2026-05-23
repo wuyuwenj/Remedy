@@ -15,6 +15,7 @@ const state = {
   optimizations: [],
   postLoadScripts: [],
   error: null,
+  eventSource: null,
 };
 
 // ---- DOM Elements ----
@@ -98,9 +99,16 @@ async function startAnalysis() {
 }
 
 function openStream(reportId) {
+  if (state.eventSource) {
+    state.eventSource.close();
+    state.eventSource = null;
+  }
+
   const eventSource = new EventSource(`${API_URL}/stream/${reportId}`);
+  state.eventSource = eventSource;
 
   eventSource.onmessage = (e) => {
+    if (reportId !== state.reportId) return;
     try {
       const event = JSON.parse(e.data);
       handleEvent(event);
@@ -110,7 +118,11 @@ function openStream(reportId) {
   };
 
   eventSource.onerror = () => {
+    if (reportId !== state.reportId) return;
     eventSource.close();
+    if (state.eventSource === eventSource) {
+      state.eventSource = null;
+    }
     if (state.phase !== 'done' && state.phase !== 'error') {
       // Stream ended — could mean the analysis is complete
       if (state.phase === 'optimizing' || state.suggestions.length > 0) {
@@ -154,7 +166,7 @@ function handleEvent(event) {
     case 'suggestions':
       state.suggestions = data.suggestions || data;
       renderSuggestions();
-      showSection(els.applySection);
+      showFinalActionLinks();
       break;
 
     case 'optimization':
@@ -174,13 +186,21 @@ function handleEvent(event) {
       state.postLoadScripts = data.scripts || data;
       break;
 
-    case 'complete':
     case 'done':
+      if (data?.metrics) { state.metrics = data.metrics; renderMetrics(); }
+      if (data?.suggestions) { state.suggestions = data.suggestions; renderSuggestions(); }
+      handleBaselineDone();
+      break;
+
+    case 'complete':
       if (data?.metrics) { state.metrics = data.metrics; renderMetrics(); }
       if (data?.suggestions) { state.suggestions = data.suggestions; renderSuggestions(); }
       if (data?.optimizations) { state.optimizations = data.optimizations; renderOptimizations(); }
       if (data?.postLoadScripts) { state.postLoadScripts = data.postLoadScripts; }
       if (data?.scripts) { state.postLoadScripts = data.scripts; }
+      if (data?.reportUrl && state.reportId) {
+        els.viewReportLink.href = `${API_URL}${data.reportUrl}`;
+      }
       finishAnalysis();
       break;
 
@@ -195,15 +215,18 @@ function handleEvent(event) {
   }
 }
 
-function finishAnalysis() {
-  // If baseline just finished and we have suggestions but no optimizations yet,
-  // auto-start testing all suggestions
-  if (state.phase !== 'optimizing' && state.suggestions.length > 0 && state.optimizations.length === 0) {
-    addLog('Auto-starting optimization tests...', 'step');
+function handleBaselineDone() {
+  if (state.suggestions.length > 0) {
+    addLog('Baseline complete. Auto-starting optimization tests...', 'step');
     testSelected();
     return;
   }
 
+  addLog('Baseline complete, but no fixes were returned to test.', 'warning');
+  finishAnalysis();
+}
+
+function finishAnalysis() {
   state.phase = 'done';
   setAgentStatus('done');
   els.analyzeBtn.disabled = false;
@@ -221,16 +244,16 @@ function finishAnalysis() {
     Re-test`;
   addLog('Analysis complete.', 'success');
 
-  // Show apply section if we have scripts or optimizations
-  if (state.postLoadScripts.length > 0 || state.optimizations.length > 0) {
-    showSection(els.applySection);
-  }
+  showFinalActionLinks();
+}
 
-  // Set report link
-  if (state.reportId) {
-    els.viewReportLink.href = `${API_URL}/report/${state.reportId}`;
-    showSection(els.applySection);
+function showFinalActionLinks() {
+  if (!state.reportId) return;
+
+  if (!els.viewReportLink.href || els.viewReportLink.href.endsWith('#')) {
+    els.viewReportLink.href = `${API_URL}/report/${state.reportId}/html`;
   }
+  showSection(els.applySection);
 }
 
 // ---- Test Selected ----
@@ -508,6 +531,11 @@ function hideSection(el) {
 }
 
 function resetUI() {
+  if (state.eventSource) {
+    state.eventSource.close();
+    state.eventSource = null;
+  }
+
   state.metrics = {};
   state.suggestions = [];
   state.optimizations = [];
@@ -528,6 +556,7 @@ function resetUI() {
   hideSection(els.optimizationSection);
   hideSection(els.applySection);
   hideSection(els.errorSection);
+  els.viewReportLink.href = '#';
 
   // Reset apply button
   els.applyFixesBtn.disabled = false;

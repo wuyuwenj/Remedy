@@ -13,12 +13,13 @@ const model = process.env.GEMINI_MODEL ?? 'gemini-3.5-flash';
 const PERFORMANCE_PROMPT = `You are Remedy, an autonomous frontend and web performance evaluator. Analyze Chrome DevTools performance trace, network request data, and page evidence.
 
 Return a JSON object with a frontend/performance comparison and up to 5 optimization suggestions, ranked by expected impact on Core Web Vitals and user experience.
+Include visible UI/component analysis whenever evidence supports it: navigation/header, footer, hero area, CTAs/buttons, images/media, text contrast, spacing, sticky elements, layout shifts, and color/style changes that users can actually see.
 
 Required shape:
 {
   "report": {
     "summary": "One paragraph verdict comparing the current page with a fast production baseline.",
-    "frontendComparison": ["Specific visible UI/layout/content observations."],
+    "frontendComparison": ["Specific visible UI/layout/content observations. Name the visible component if possible, e.g. navbar, hero CTA, card grid, footer, image/media, form, button color, spacing, sticky element."],
     "performanceComparison": ["Trace/network-backed performance observations."],
     "improveNext": ["Concrete elements, resources, or implementation areas to improve."],
     "goodEnough": ["What appears acceptable and should not be prioritized now."],
@@ -30,7 +31,7 @@ Required shape:
       "name": "Short description",
       "impact": "high" | "medium" | "low",
       "expectedImprovement": "LCP -40%",
-      "explanation": "Why this helps (2-3 sentences)",
+      "explanation": "Why this helps (2-3 sentences). If the change is visible, name the affected UI component and the expected visual difference.",
       "evidence": "What trace/network/page evidence supports this.",
       "confidence": "high" | "medium" | "low",
       "initScript": "JavaScript that runs before page scripts to apply the fix",

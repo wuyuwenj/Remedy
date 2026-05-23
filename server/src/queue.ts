@@ -1,8 +1,8 @@
 const MAX_CONCURRENT = 1;
 const MAX_QUEUE_SIZE = 10;
-// Heavy pages can take ~25s to load + MCP startup + Gemini, so allow generous
-// headroom while still bounding a truly hung job.
-const JOB_TIMEOUT_MS = 180_000;
+const JOB_TIMEOUT_MS = process.env.JOB_TIMEOUT_MS
+  ? Math.max(1, parseInt(process.env.JOB_TIMEOUT_MS, 10))
+  : null;
 
 interface QueueItem {
   fn: () => Promise<void>;
@@ -20,12 +20,16 @@ async function processNext(): Promise<void> {
   running++;
 
   try {
-    await Promise.race([
-      item.fn(),
-      new Promise<never>((_, reject) =>
-        setTimeout(() => reject(new Error('Job timed out after 180s')), JOB_TIMEOUT_MS)
-      ),
-    ]);
+    if (JOB_TIMEOUT_MS) {
+      await Promise.race([
+        item.fn(),
+        new Promise<never>((_, reject) =>
+          setTimeout(() => reject(new Error(`Job timed out after ${Math.round(JOB_TIMEOUT_MS / 1000)}s`)), JOB_TIMEOUT_MS)
+        ),
+      ]);
+    } else {
+      await item.fn();
+    }
     item.resolve();
   } catch (err) {
     item.reject(err instanceof Error ? err : new Error(String(err)));
