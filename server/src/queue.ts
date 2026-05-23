@@ -1,6 +1,6 @@
 const MAX_CONCURRENT = 1;
 const MAX_QUEUE_SIZE = 10;
-const JOB_TIMEOUT_MS = 60_000;
+const JOB_TIMEOUT_MS = 180_000;
 
 interface QueueItem {
   fn: () => Promise<void>;
@@ -21,7 +21,7 @@ async function processNext(): Promise<void> {
     await Promise.race([
       item.fn(),
       new Promise<never>((_, reject) =>
-        setTimeout(() => reject(new Error('Job timed out after 60s')), JOB_TIMEOUT_MS)
+        setTimeout(() => reject(new Error('Job timed out after 180s')), JOB_TIMEOUT_MS)
       ),
     ]);
     item.resolve();

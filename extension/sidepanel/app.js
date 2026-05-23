@@ -270,7 +270,23 @@ function getSelectedFixIds() {
 
 // ---- Apply Fixes ----
 async function applyFixes() {
-  if (state.postLoadScripts.length === 0) {
+  let scripts = state.postLoadScripts;
+
+  if (scripts.length === 0) {
+    scripts = state.optimizations
+      .map((o) => o.postLoadScript)
+      .filter(Boolean);
+  }
+
+  if (scripts.length === 0) {
+    const selectedIds = new Set(getSelectedFixIds());
+    scripts = state.suggestions
+      .filter((s) => selectedIds.has(s.id))
+      .map((s) => s.postLoadScript)
+      .filter(Boolean);
+  }
+
+  if (scripts.length === 0) {
     addLog('No fix scripts available to apply.', 'warning');
     return;
   }
@@ -279,7 +295,7 @@ async function applyFixes() {
   els.applyFixesBtn.innerHTML = '<span class="spinner"></span> Applying...';
 
   chrome.runtime.sendMessage(
-    { type: 'APPLY_FIXES', scripts: state.postLoadScripts },
+    { type: 'APPLY_FIXES', scripts },
     (response) => {
       els.applyFixesBtn.disabled = false;
       if (response?.success) {
