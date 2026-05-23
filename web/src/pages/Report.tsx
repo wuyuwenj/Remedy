@@ -1,5 +1,8 @@
 import { useEffect, useState } from 'react';
 import { useParams } from 'react-router-dom';
+import {
+  Activity, ArrowLeft, Share2, Loader2, Search, TrendingDown,
+} from 'lucide-react';
 import type { BaselineResult, OptimizationResult } from '../types';
 import MetricsCard, { getMetricRating } from '../components/MetricsCard';
 import OptimizationRow from '../components/OptimizationRow';
@@ -48,242 +51,158 @@ export default function Report() {
     });
   }
 
-  // Loading
   if (loading) {
     return (
-      <div
-        style={{
-          flex: 1,
-          display: 'flex',
-          flexDirection: 'column',
-          alignItems: 'center',
-          justifyContent: 'center',
-          gap: 16,
-        }}
-      >
-        <div
-          style={{
-            width: 48,
-            height: 48,
-            border: '3px solid #2a2a4a',
-            borderTopColor: '#6366f1',
-            borderRadius: '50%',
-            animation: 'spin 0.8s linear infinite',
-          }}
-        />
-        <span style={{ color: '#94a3b8', fontSize: 15 }}>Loading report...</span>
-      </div>
+      <main className="relative min-h-screen flex flex-col items-center justify-center gap-4">
+        <div className="pointer-events-none absolute inset-0 bg-hero" />
+        <Loader2 className="size-12 text-[color:var(--color-cyan)] animate-spin relative z-10" />
+        <span className="text-muted-foreground text-[15px] relative z-10">Loading report...</span>
+      </main>
     );
   }
 
-  // Error
   if (error || !report) {
     return (
-      <div
-        style={{
-          flex: 1,
-          display: 'flex',
-          flexDirection: 'column',
-          alignItems: 'center',
-          justifyContent: 'center',
-          gap: 16,
-          padding: 24,
-        }}
-      >
-        <div style={{ fontSize: 48 }}>&#x1f50d;</div>
-        <h2 style={{ fontSize: 22, fontWeight: 700, color: '#e2e8f0' }}>Report Not Found</h2>
-        <p style={{ color: '#94a3b8', fontSize: 15 }}>{error || 'This report does not exist.'}</p>
-        <a
-          href="/"
-          style={{
-            padding: '10px 24px',
-            fontSize: 14,
-            fontWeight: 600,
-            background: '#6366f1',
-            color: '#fff',
-            borderRadius: 10,
-            display: 'inline-block',
-            marginTop: 8,
-          }}
-        >
-          Go Home
-        </a>
-      </div>
+      <main className="relative min-h-screen flex flex-col items-center justify-center gap-4 px-6">
+        <div className="pointer-events-none absolute inset-0 bg-hero" />
+        <div className="relative z-10 flex flex-col items-center gap-4">
+          <Search className="size-12 text-muted-foreground" />
+          <h2 className="text-xl font-semibold text-foreground">Report Not Found</h2>
+          <p className="text-muted-foreground text-[15px]">{error || 'This report does not exist.'}</p>
+          <a
+            href="/"
+            className="mt-2 inline-flex items-center gap-2 rounded-[10px] px-5 py-2.5 text-sm font-semibold text-[color:var(--primary-foreground)]"
+            style={{ background: 'var(--gradient-cyan)' }}
+          >
+            Go Home
+          </a>
+        </div>
+      </main>
     );
   }
 
   const { baseline, optimizations, totalImprovement, url } = report;
 
   return (
-    <div className="container" style={{ paddingTop: 40, paddingBottom: 60, maxWidth: 900 }}>
-      {/* Header */}
-      <div
-        style={{
-          display: 'flex',
-          alignItems: 'flex-start',
-          justifyContent: 'space-between',
-          marginBottom: 32,
-        }}
-      >
-        <div>
+    <main className="relative min-h-screen overflow-x-hidden">
+      {/* Background */}
+      <div className="pointer-events-none absolute inset-0 bg-hero" />
+      <div className="pointer-events-none absolute inset-0 grid-bg opacity-40" />
+
+      {/* Nav */}
+      <header className="relative z-20">
+        <div className="mx-auto max-w-7xl px-6 py-5 flex items-center justify-between">
+          <a href="/" className="flex items-center gap-2">
+            <span
+              className="grid place-items-center size-7 rounded-md"
+              style={{ background: 'var(--gradient-cyan)' }}
+            >
+              <Activity className="size-4 text-[color:var(--primary-foreground)]" />
+            </span>
+            <span className="font-semibold tracking-tight">Remedy</span>
+          </a>
+
+          <button
+            onClick={handleShare}
+            className="inline-flex items-center gap-2 text-sm font-medium rounded-md px-4 py-2 text-[color:var(--primary-foreground)] transition-transform active:scale-[0.98]"
+            style={{ background: 'var(--gradient-cyan)' }}
+          >
+            <Share2 className="size-4" />
+            {copied ? 'Copied!' : 'Share'}
+          </button>
+        </div>
+      </header>
+
+      <div className="relative z-10 mx-auto max-w-[900px] px-6 pt-4 pb-16">
+        {/* Back + Title */}
+        <div className="mb-8">
           <a
             href="/"
-            style={{
-              fontSize: 13,
-              color: '#64748b',
-              textDecoration: 'none',
-              display: 'flex',
-              alignItems: 'center',
-              gap: 6,
-              marginBottom: 8,
-            }}
+            className="inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors mb-3"
           >
-            &larr; Back
+            <ArrowLeft className="size-3.5" />
+            Back
           </a>
-          <h1
-            style={{
-              fontSize: 28,
-              fontWeight: 800,
-              background: 'linear-gradient(135deg, #e2e8f0, #6366f1)',
-              WebkitBackgroundClip: 'text',
-              WebkitTextFillColor: 'transparent',
-              marginBottom: 6,
-            }}
-          >
+          <h1 className="text-3xl font-semibold tracking-tight text-gradient mb-1.5">
             Performance Report
           </h1>
-          <div style={{ fontSize: 14, color: '#64748b', wordBreak: 'break-all' }}>{url}</div>
+          <div className="text-sm text-muted-foreground font-mono break-all">{url}</div>
         </div>
 
-        <button
-          onClick={handleShare}
-          style={{
-            padding: '10px 20px',
-            fontSize: 14,
-            fontWeight: 600,
-            background: '#6366f1',
-            color: '#fff',
-            borderRadius: 10,
-            transition: 'background 0.2s',
-            flexShrink: 0,
-          }}
-        >
-          {copied ? 'Copied!' : 'Share'}
-        </button>
+        {/* Summary Card */}
+        {totalImprovement && (
+          <div className="fade-up panel mb-8 p-8 text-center relative overflow-hidden">
+            <div
+              className="absolute -inset-px rounded-[inherit] pointer-events-none"
+              style={{
+                background: 'radial-gradient(400px 150px at 50% 0%, oklch(0.78 0.18 155 / 0.2), transparent 60%)',
+              }}
+            />
+            <div className="relative">
+              <div className="inline-flex items-center gap-1.5 text-sm text-muted-foreground mb-3">
+                <TrendingDown className="size-4 text-[color:var(--color-improve)]" />
+                Total Performance Improvement
+              </div>
+              <div className="text-5xl font-extrabold font-mono text-[color:var(--color-improve)] leading-none mb-4">
+                {totalImprovement}
+              </div>
+              <div className="text-sm text-muted-foreground">
+                across {optimizations.length} optimization{optimizations.length !== 1 ? 's' : ''}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Baseline Metrics */}
+        {baseline && (
+          <div className="fade-up mb-8">
+            <h2 className="text-lg font-semibold mb-4 text-foreground">
+              Baseline Metrics
+            </h2>
+            <div className="flex gap-3">
+              <MetricsCard label="LCP" value={baseline.lcp} unit="ms" rating={getMetricRating('lcp', baseline.lcp)} />
+              <MetricsCard label="CLS" value={baseline.cls} unit="" rating={getMetricRating('cls', baseline.cls)} />
+              <MetricsCard label="INP" value={baseline.inp} unit="ms" rating={getMetricRating('inp', baseline.inp)} />
+              <MetricsCard label="TTFB" value={baseline.ttfb} unit="ms" rating={getMetricRating('ttfb', baseline.ttfb)} />
+            </div>
+          </div>
+        )}
+
+        {/* Optimizations */}
+        {optimizations.length > 0 && (
+          <div className="fade-up mb-8">
+            <h2 className="text-lg font-semibold mb-4 text-foreground">
+              Optimizations Applied
+            </h2>
+            <div className="flex flex-col gap-3">
+              {optimizations.map((opt) => (
+                <OptimizationRow key={opt.id} optimization={opt} />
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Before/After */}
+        {baseline?.screenshot && optimizations.some((o) => o.screenshot) && (
+          <div className="fade-up mb-8">
+            <h2 className="text-lg font-semibold mb-4 text-foreground">
+              Visual Comparison
+            </h2>
+            <BeforeAfter
+              beforeScreenshot={baseline.screenshot}
+              afterScreenshot={optimizations[optimizations.length - 1]?.screenshot}
+            />
+          </div>
+        )}
+
+        {/* Footer */}
+        <footer className="border-t border-white/5 pt-6 text-center text-sm text-muted-foreground">
+          Generated by{' '}
+          <a href="/" className="text-[color:var(--color-cyan)] font-semibold hover:text-foreground transition-colors">
+            Remedy
+          </a>
+        </footer>
       </div>
-
-      {/* Summary Card */}
-      {totalImprovement && (
-        <div
-          className="fade-in-up"
-          style={{
-            background: 'linear-gradient(135deg, #1a2e1a, #1a1a2e)',
-            border: '1px solid #22c55e40',
-            borderRadius: 16,
-            padding: 32,
-            textAlign: 'center',
-            marginBottom: 32,
-          }}
-        >
-          <div style={{ fontSize: 14, color: '#94a3b8', marginBottom: 8, fontWeight: 500 }}>
-            Total Performance Improvement
-          </div>
-          <div
-            style={{
-              fontSize: 48,
-              fontWeight: 800,
-              color: '#22c55e',
-              fontFamily: "'JetBrains Mono', monospace",
-              lineHeight: 1,
-              marginBottom: 12,
-            }}
-          >
-            {totalImprovement}
-          </div>
-          <div style={{ fontSize: 14, color: '#94a3b8' }}>
-            across {optimizations.length} optimization{optimizations.length !== 1 ? 's' : ''}
-          </div>
-        </div>
-      )}
-
-      {/* Baseline Metrics */}
-      {baseline && (
-        <div className="fade-in" style={{ marginBottom: 32 }}>
-          <h2 style={{ fontSize: 18, fontWeight: 700, marginBottom: 16, color: '#e2e8f0' }}>
-            Baseline Metrics
-          </h2>
-          <div style={{ display: 'flex', gap: 12 }}>
-            <MetricsCard
-              label="LCP"
-              value={baseline.lcp}
-              unit="ms"
-              rating={getMetricRating('lcp', baseline.lcp)}
-            />
-            <MetricsCard
-              label="CLS"
-              value={baseline.cls}
-              unit=""
-              rating={getMetricRating('cls', baseline.cls)}
-            />
-            <MetricsCard
-              label="INP"
-              value={baseline.inp}
-              unit="ms"
-              rating={getMetricRating('inp', baseline.inp)}
-            />
-            <MetricsCard
-              label="TTFB"
-              value={baseline.ttfb}
-              unit="ms"
-              rating={getMetricRating('ttfb', baseline.ttfb)}
-            />
-          </div>
-        </div>
-      )}
-
-      {/* Optimizations */}
-      {optimizations.length > 0 && (
-        <div className="fade-in" style={{ marginBottom: 32 }}>
-          <h2 style={{ fontSize: 18, fontWeight: 700, marginBottom: 16, color: '#e2e8f0' }}>
-            Optimizations Applied
-          </h2>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-            {optimizations.map((opt) => (
-              <OptimizationRow key={opt.id} optimization={opt} />
-            ))}
-          </div>
-        </div>
-      )}
-
-      {/* Before/After */}
-      {baseline?.screenshot && optimizations.some((o) => o.screenshot) && (
-        <div className="fade-in" style={{ marginBottom: 32 }}>
-          <h2 style={{ fontSize: 18, fontWeight: 700, marginBottom: 16, color: '#e2e8f0' }}>
-            Visual Comparison
-          </h2>
-          <BeforeAfter
-            beforeScreenshot={baseline.screenshot}
-            afterScreenshot={optimizations[optimizations.length - 1]?.screenshot}
-          />
-        </div>
-      )}
-
-      {/* Footer */}
-      <div
-        style={{
-          textAlign: 'center',
-          padding: '24px 0',
-          borderTop: '1px solid #1a1a2e',
-          color: '#64748b',
-          fontSize: 13,
-        }}
-      >
-        Generated by{' '}
-        <a href="/" style={{ color: '#6366f1', fontWeight: 600 }}>
-          Remedy
-        </a>{' '}
-        &mdash; Built for Google I/O 2026
-      </div>
-    </div>
+    </main>
   );
 }

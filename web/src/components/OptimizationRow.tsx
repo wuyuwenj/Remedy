@@ -1,16 +1,7 @@
 import { useState } from 'react';
 import type { OptimizationResult } from '../types';
 import BeforeAfter from './BeforeAfter';
-
-interface OptimizationRowProps {
-  optimization: OptimizationResult;
-}
-
-const impactColor: Record<string, string> = {
-  high: '#22c55e',
-  medium: '#f59e0b',
-  low: '#6366f1',
-};
+import { ChevronRight } from 'lucide-react';
 
 function metricDelta(before: number | undefined, after: number | undefined): string | null {
   if (before == null || after == null || before === 0) return null;
@@ -18,7 +9,7 @@ function metricDelta(before: number | undefined, after: number | undefined): str
   return pct > 0 ? `-${pct.toFixed(1)}%` : `+${Math.abs(pct).toFixed(1)}%`;
 }
 
-export default function OptimizationRow({ optimization }: OptimizationRowProps) {
+export default function OptimizationRow({ optimization }: { optimization: OptimizationResult }) {
   const [expanded, setExpanded] = useState(false);
   const { name, improvement, before, after, explanation, initScript, postLoadScript, screenshot } =
     optimization;
@@ -28,47 +19,20 @@ export default function OptimizationRow({ optimization }: OptimizationRowProps) 
   );
 
   return (
-    <div
-      style={{
-        background: '#1a1a2e',
-        border: '1px solid #2a2a4a',
-        borderRadius: 12,
-        overflow: 'hidden',
-        animation: 'fadeIn 0.4s ease-out both',
-      }}
-    >
+    <div className="panel overflow-hidden fade-up">
       {/* Header */}
       <button
         onClick={() => setExpanded(!expanded)}
-        style={{
-          width: '100%',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          padding: '16px 20px',
-          background: 'transparent',
-          color: '#e2e8f0',
-          fontSize: 15,
-          fontWeight: 600,
-          gap: 12,
-        }}
+        className="w-full flex items-center justify-between px-5 py-4 bg-transparent text-foreground text-[15px] font-semibold gap-3 hover:bg-white/[0.02] transition-colors"
       >
-        <div style={{ display: 'flex', alignItems: 'center', gap: 12, flex: 1 }}>
-          <span
-            style={{
-              fontSize: 18,
-              transition: 'transform 0.2s',
-              transform: expanded ? 'rotate(90deg)' : 'rotate(0)',
-              display: 'inline-block',
-            }}
-          >
-            &#9654;
-          </span>
+        <div className="flex items-center gap-3 flex-1">
+          <ChevronRight
+            className={`size-4 text-muted-foreground transition-transform ${expanded ? 'rotate-90' : ''}`}
+          />
           <span>{name}</span>
         </div>
 
-        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-          {/* Metric deltas */}
+        <div className="flex items-center gap-2.5 flex-wrap justify-end">
           {metrics.map((m) => {
             const delta = metricDelta(before[m], after[m]);
             if (!delta) return null;
@@ -76,32 +40,18 @@ export default function OptimizationRow({ optimization }: OptimizationRowProps) 
             return (
               <span
                 key={m}
-                style={{
-                  fontSize: 12,
-                  fontFamily: "'JetBrains Mono', monospace",
-                  color: isImprovement ? '#22c55e' : '#ef4444',
-                  background: isImprovement ? '#22c55e15' : '#ef444415',
-                  padding: '2px 8px',
-                  borderRadius: 6,
-                  fontWeight: 600,
-                }}
+                className={`text-xs font-mono font-semibold px-2 py-0.5 rounded-md ${
+                  isImprovement
+                    ? 'text-[color:var(--color-improve)] bg-[color:var(--color-improve)]/10'
+                    : 'text-[color:var(--color-bad)] bg-[color:var(--color-bad)]/10'
+                }`}
               >
                 {m.toUpperCase()} {delta}
               </span>
             );
           })}
 
-          {/* Overall improvement */}
-          <span
-            style={{
-              fontSize: 13,
-              fontWeight: 700,
-              color: '#22c55e',
-              background: '#22c55e15',
-              padding: '4px 12px',
-              borderRadius: 20,
-            }}
-          >
+          <span className="text-[13px] font-bold font-mono text-[color:var(--color-improve)] bg-[color:var(--color-improve)]/10 px-3 py-1 rounded-full">
             {improvement}
           </span>
         </div>
@@ -109,60 +59,33 @@ export default function OptimizationRow({ optimization }: OptimizationRowProps) 
 
       {/* Expanded content */}
       {expanded && (
-        <div
-          style={{
-            padding: '0 20px 20px',
-            borderTop: '1px solid #2a2a4a',
-            animation: 'slideDown 0.3s ease-out',
-          }}
-        >
+        <div className="px-5 pb-5 border-t border-white/5">
           {/* Before/After metrics table */}
           {metrics.length > 0 && (
             <div
-              style={{
-                display: 'grid',
-                gridTemplateColumns: `100px repeat(${metrics.length}, 1fr)`,
-                gap: 0,
-                margin: '16px 0',
-                fontSize: 13,
-                fontFamily: "'JetBrains Mono', monospace",
-              }}
+              className="grid my-4 text-[13px] font-mono"
+              style={{ gridTemplateColumns: `100px repeat(${metrics.length}, 1fr)` }}
             >
-              <div style={{ color: '#64748b', padding: '8px 0' }} />
+              <div className="text-muted-foreground py-2" />
               {metrics.map((m) => (
                 <div
                   key={m}
-                  style={{
-                    color: '#94a3b8',
-                    fontWeight: 600,
-                    textTransform: 'uppercase',
-                    textAlign: 'center',
-                    padding: '8px 0',
-                    borderBottom: '1px solid #2a2a4a',
-                  }}
+                  className="text-muted-foreground font-semibold uppercase text-center py-2 border-b border-white/5"
                 >
                   {m}
                 </div>
               ))}
 
-              {/* Before row */}
-              <div style={{ color: '#94a3b8', padding: '8px 0' }}>Before</div>
+              <div className="text-muted-foreground py-2">Before</div>
               {metrics.map((m) => (
-                <div
-                  key={`b-${m}`}
-                  style={{ textAlign: 'center', padding: '8px 0', color: '#ef4444' }}
-                >
+                <div key={`b-${m}`} className="text-center py-2 text-[color:var(--color-bad)]">
                   {before[m]?.toFixed(m === 'cls' ? 3 : 0)}
                 </div>
               ))}
 
-              {/* After row */}
-              <div style={{ color: '#94a3b8', padding: '8px 0' }}>After</div>
+              <div className="text-muted-foreground py-2">After</div>
               {metrics.map((m) => (
-                <div
-                  key={`a-${m}`}
-                  style={{ textAlign: 'center', padding: '8px 0', color: '#22c55e' }}
-                >
+                <div key={`a-${m}`} className="text-center py-2 text-[color:var(--color-improve)]">
                   {after[m]?.toFixed(m === 'cls' ? 3 : 0)}
                 </div>
               ))}
@@ -170,86 +93,33 @@ export default function OptimizationRow({ optimization }: OptimizationRowProps) 
           )}
 
           {/* Explanation */}
-          <div style={{ marginBottom: 16 }}>
-            <div
-              style={{
-                fontSize: 12,
-                fontWeight: 600,
-                textTransform: 'uppercase',
-                color: '#94a3b8',
-                letterSpacing: '0.05em',
-                marginBottom: 6,
-              }}
-            >
+          <div className="mb-4">
+            <div className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-1.5">
               Explanation
             </div>
-            <div style={{ fontSize: 14, color: '#cbd5e1', lineHeight: 1.6 }}>
+            <div className="text-sm text-foreground/80 leading-relaxed">
               {explanation}
             </div>
           </div>
 
           {/* Code snippets */}
           {initScript && (
-            <div style={{ marginBottom: 12 }}>
-              <div
-                style={{
-                  fontSize: 12,
-                  fontWeight: 600,
-                  textTransform: 'uppercase',
-                  color: '#94a3b8',
-                  letterSpacing: '0.05em',
-                  marginBottom: 6,
-                }}
-              >
+            <div className="mb-3">
+              <div className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-1.5">
                 Init Script
               </div>
-              <pre
-                style={{
-                  background: '#0f0f1a',
-                  border: '1px solid #1e1e3a',
-                  borderRadius: 8,
-                  padding: 12,
-                  fontSize: 12,
-                  fontFamily: "'JetBrains Mono', monospace",
-                  color: '#a5b4fc',
-                  overflowX: 'auto',
-                  whiteSpace: 'pre-wrap',
-                  wordBreak: 'break-word',
-                }}
-              >
+              <pre className="bg-black/30 border border-white/5 rounded-lg p-3 text-xs font-mono text-[color:var(--color-cyan)] overflow-x-auto whitespace-pre-wrap break-words">
                 {initScript}
               </pre>
             </div>
           )}
 
           {postLoadScript && (
-            <div style={{ marginBottom: 12 }}>
-              <div
-                style={{
-                  fontSize: 12,
-                  fontWeight: 600,
-                  textTransform: 'uppercase',
-                  color: '#94a3b8',
-                  letterSpacing: '0.05em',
-                  marginBottom: 6,
-                }}
-              >
+            <div className="mb-3">
+              <div className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-1.5">
                 Post-Load Script
               </div>
-              <pre
-                style={{
-                  background: '#0f0f1a',
-                  border: '1px solid #1e1e3a',
-                  borderRadius: 8,
-                  padding: 12,
-                  fontSize: 12,
-                  fontFamily: "'JetBrains Mono', monospace",
-                  color: '#a5b4fc',
-                  overflowX: 'auto',
-                  whiteSpace: 'pre-wrap',
-                  wordBreak: 'break-word',
-                }}
-              >
+              <pre className="bg-black/30 border border-white/5 rounded-lg p-3 text-xs font-mono text-[color:var(--color-cyan)] overflow-x-auto whitespace-pre-wrap break-words">
                 {postLoadScript}
               </pre>
             </div>
