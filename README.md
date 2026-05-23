@@ -127,6 +127,26 @@ npm run dev -- https://example.com --browser-url http://127.0.0.1:9222
 npm run dev -- https://example.com --max-tool-calls 12
 ```
 
+### Local HTML Report
+
+Generate a static Lighthouse + DevTools comparison report:
+
+```bash
+npm run dev -- --url "https://example.com" --html-report --max-variants 2
+```
+
+This deterministic workflow:
+
+1. opens the URL through Chrome DevTools MCP
+2. captures the original screenshot and accessibility snapshot
+3. runs `lighthouse_audit` for accessibility, SEO, best practices, and agentic browsing context
+4. runs a DevTools performance trace for Core Web Vitals-style evidence
+5. asks Gemini for issues, suggestions, and safe visual variants
+6. applies each variant, captures another screenshot, reruns the trace, and writes metric deltas
+7. writes `reports/<site>-<timestamp>/index.html` and `report.json`
+
+Use `--report-dir <path>` to choose the output directory and `--viewport 390x844` to run a fixed mobile-size viewport. The HTML report is self-contained enough to open from disk and includes links to screenshots, Lighthouse output, snapshots, and trace artifacts.
+
 ## Generated DevTools Files
 
 Chrome DevTools MCP may write local evidence files during a run:

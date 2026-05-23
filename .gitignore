@@ -9,3 +9,4 @@ dist/
 snapshot.txt
 screenshot.png
 trace*.json.gz
+reports/
