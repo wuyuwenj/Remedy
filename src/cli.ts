@@ -623,8 +623,13 @@ async function main(): Promise<void> {
   }
 }
 
-main().catch((error: unknown) => {
-  const message = error instanceof Error ? error.message : String(error);
-  console.error(`[remedy] ${message}`);
-  process.exit(1);
-});
+main()
+  .then(() => {
+    console.error("[remedy] Done. ✅");
+    process.exit(0);
+  })
+  .catch((error: unknown) => {
+    const message = error instanceof Error ? error.message : String(error);
+    console.error(`[remedy] ${message}`);
+    process.exit(1);
+  });
