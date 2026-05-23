@@ -1,5 +1,7 @@
 const MAX_CONCURRENT = 1;
 const MAX_QUEUE_SIZE = 10;
+// Heavy pages can take ~25s to load + MCP startup + Gemini, so allow generous
+// headroom while still bounding a truly hung job.
 const JOB_TIMEOUT_MS = 180_000;
 
 interface QueueItem {

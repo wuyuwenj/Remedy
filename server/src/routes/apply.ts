@@ -56,16 +56,19 @@ router.post('/apply/:id', async (req: Request, res: Response) => {
 
       session.optimizations = optimizations;
 
-      // Calculate total improvement
+      // Calculate total improvement against each result's in-session control
+      // (opt.before), not the possibly-stale saved baseline — otherwise the
+      // persisted summary reintroduces the network drift we just removed.
       let totalLcpPct = 0;
       for (const opt of optimizations) {
-        if (session.baseline!.lcp > 0 && opt.after.lcp != null) {
-          totalLcpPct += ((session.baseline!.lcp - opt.after.lcp) / session.baseline!.lcp) * 100;
+        const beforeLcp = opt.before.lcp;
+        if (beforeLcp != null && beforeLcp > 0 && opt.after.lcp != null) {
+          totalLcpPct += ((beforeLcp - opt.after.lcp) / beforeLcp) * 100;
         }
       }
       session.totalImprovement = totalLcpPct > 0
-        ? `Estimated LCP improvement: -${totalLcpPct.toFixed(1)}% (combined)`
-        : 'No measurable improvement';
+        ? `Estimated LCP improvement: -${totalLcpPct.toFixed(1)}% (combined, vs in-session control)`
+        : 'No measurable improvement (within run-to-run noise)';
 
       session.status = 'complete';
 

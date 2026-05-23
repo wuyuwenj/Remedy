@@ -54,6 +54,8 @@ export interface OptimizationResult {
 }
 
 export interface SSEEvent {
-  type: 'status' | 'baseline' | 'suggestions' | 'optimization' | 'complete' | 'error';
+  // 'done' signals the baseline phase finished (metrics + suggestions ready,
+  // awaiting fix selection); 'complete' signals the optimization phase finished.
+  type: 'status' | 'baseline' | 'suggestions' | 'optimization' | 'done' | 'complete' | 'error';
   data: any;
 }
