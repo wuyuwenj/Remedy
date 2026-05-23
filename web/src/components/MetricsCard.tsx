@@ -7,16 +7,10 @@ interface MetricsCardProps {
   rating: Rating;
 }
 
-const ratingColors: Record<Rating, string> = {
-  good: '#22c55e',
-  'needs-improvement': '#f59e0b',
-  poor: '#ef4444',
-};
-
-const ratingLabels: Record<Rating, string> = {
-  good: 'Good',
-  'needs-improvement': 'Needs Work',
-  poor: 'Poor',
+const ratingStyles: Record<Rating, { color: string; label: string }> = {
+  good: { color: 'var(--color-improve)', label: 'Good' },
+  'needs-improvement': { color: 'var(--color-warn)', label: 'Needs Work' },
+  poor: { color: 'var(--color-bad)', label: 'Poor' },
 };
 
 export function getMetricRating(metric: string, value: number): Rating {
@@ -51,76 +45,34 @@ function formatValue(value: number, unit: string): string {
 }
 
 export default function MetricsCard({ label, value, unit, rating }: MetricsCardProps) {
-  const color = ratingColors[rating];
+  const { color, label: ratingLabel } = ratingStyles[rating];
 
   return (
     <div
-      style={{
-        background: '#1a1a2e',
-        border: `1px solid ${color}33`,
-        borderRadius: 12,
-        padding: '20px 16px',
-        flex: '1 1 0',
-        minWidth: 140,
-        textAlign: 'center',
-        position: 'relative',
-        overflow: 'hidden',
-        animation: 'fadeIn 0.5s ease-out both',
-      }}
+      className="panel relative overflow-hidden flex-1 min-w-[140px] text-center px-4 py-5 fade-up"
+      style={{ borderColor: `color-mix(in oklch, ${color}, transparent 80%)` }}
     >
-      {/* Glow top accent */}
       <div
-        style={{
-          position: 'absolute',
-          top: 0,
-          left: '50%',
-          transform: 'translateX(-50%)',
-          width: '60%',
-          height: 2,
-          background: `linear-gradient(90deg, transparent, ${color}, transparent)`,
-        }}
+        className="absolute top-0 left-1/2 -translate-x-1/2 w-3/5 h-0.5"
+        style={{ background: `linear-gradient(90deg, transparent, ${color}, transparent)` }}
       />
 
-      <div
-        style={{
-          fontSize: 12,
-          fontWeight: 600,
-          textTransform: 'uppercase',
-          letterSpacing: '0.08em',
-          color: '#94a3b8',
-          marginBottom: 8,
-        }}
-      >
+      <div className="text-xs font-semibold uppercase tracking-widest text-muted-foreground mb-2">
         {label}
       </div>
 
       <div
-        style={{
-          fontSize: 32,
-          fontWeight: 700,
-          color,
-          fontFamily: "'JetBrains Mono', monospace",
-          lineHeight: 1,
-          marginBottom: 8,
-        }}
+        className="text-[32px] font-bold font-mono leading-none mb-2"
+        style={{ color }}
       >
         {formatValue(value, unit)}
       </div>
 
       <div
-        style={{
-          fontSize: 11,
-          fontWeight: 600,
-          color,
-          background: `${color}15`,
-          display: 'inline-block',
-          padding: '2px 10px',
-          borderRadius: 20,
-          textTransform: 'uppercase',
-          letterSpacing: '0.05em',
-        }}
+        className="inline-block text-[11px] font-semibold uppercase tracking-wider px-2.5 py-0.5 rounded-full"
+        style={{ color, background: `color-mix(in oklch, ${color}, transparent 88%)` }}
       >
-        {ratingLabels[rating]}
+        {ratingLabel}
       </div>
     </div>
   );

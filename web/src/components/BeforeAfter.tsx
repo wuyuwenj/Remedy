@@ -10,98 +10,48 @@ function toSrc(data?: string): string | undefined {
   return `data:image/png;base64,${data}`;
 }
 
-const placeholderStyle: React.CSSProperties = {
-  background: '#0f0f1a',
-  border: '1px dashed #2a2a4a',
-  borderRadius: 8,
-  display: 'flex',
-  alignItems: 'center',
-  justifyContent: 'center',
-  color: '#64748b',
-  fontSize: 13,
-  minHeight: 180,
-  flex: 1,
-};
-
 export default function BeforeAfter({ beforeScreenshot, afterScreenshot }: BeforeAfterProps) {
   if (!beforeScreenshot && !afterScreenshot) return null;
 
   return (
-    <div style={{ marginTop: 16 }}>
-      <div
-        style={{
-          fontSize: 12,
-          fontWeight: 600,
-          textTransform: 'uppercase',
-          color: '#94a3b8',
-          letterSpacing: '0.05em',
-          marginBottom: 8,
-        }}
-      >
+    <div className="mt-4">
+      <div className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-2">
         Screenshots
       </div>
-      <div
-        style={{
-          display: 'flex',
-          gap: 16,
-          flexWrap: 'wrap',
-        }}
-      >
+      <div className="flex gap-4 flex-wrap">
         {/* Before */}
-        <div style={{ flex: 1, minWidth: 240 }}>
-          <div
-            style={{
-              fontSize: 11,
-              fontWeight: 600,
-              textTransform: 'uppercase',
-              color: '#ef4444',
-              marginBottom: 6,
-              letterSpacing: '0.05em',
-            }}
-          >
+        <div className="flex-1 min-w-[240px]">
+          <div className="text-[11px] font-semibold uppercase tracking-wider text-[color:var(--color-bad)] mb-1.5">
             Before
           </div>
           {beforeScreenshot ? (
             <img
               src={toSrc(beforeScreenshot)}
               alt="Before optimization"
-              style={{
-                width: '100%',
-                borderRadius: 8,
-                border: '1px solid #2a2a4a',
-              }}
+              className="w-full rounded-lg border border-white/10"
             />
           ) : (
-            <div style={placeholderStyle}>No screenshot</div>
+            <div className="panel flex items-center justify-center text-muted-foreground text-[13px] min-h-[180px]">
+              No screenshot
+            </div>
           )}
         </div>
 
         {/* After */}
-        <div style={{ flex: 1, minWidth: 240 }}>
-          <div
-            style={{
-              fontSize: 11,
-              fontWeight: 600,
-              textTransform: 'uppercase',
-              color: '#22c55e',
-              marginBottom: 6,
-              letterSpacing: '0.05em',
-            }}
-          >
+        <div className="flex-1 min-w-[240px]">
+          <div className="text-[11px] font-semibold uppercase tracking-wider text-[color:var(--color-improve)] mb-1.5">
             After
           </div>
           {afterScreenshot ? (
             <img
               src={toSrc(afterScreenshot)}
               alt="After optimization"
-              style={{
-                width: '100%',
-                borderRadius: 8,
-                border: '1px solid #2a2a4a',
-              }}
+              className="w-full rounded-lg border border-white/10"
             />
           ) : (
-            <div style={placeholderStyle}>No screenshot</div>
+            <div className="panel flex items-center justify-center text-muted-foreground text-[13px] min-h-[180px]">
+              No screenshot
+            </div>
           )}
         </div>
       </div>
