@@ -466,6 +466,66 @@ body {
   border-color: rgba(16, 185, 129, 0.4) !important;
 }
 
+/* ================= Fix Toggle Switch ================= */
+.opt-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.fix-toggle {
+  position: relative;
+  width: 36px;
+  height: 20px;
+  background: #27272a;
+  border: 1px solid var(--border-subtle);
+  border-radius: 10px;
+  cursor: pointer;
+  transition: background 0.2s ease, border-color 0.2s ease;
+  flex-shrink: 0;
+}
+
+.fix-toggle-knob {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 14px;
+  height: 14px;
+  background: #71717a;
+  border-radius: 50%;
+  transition: transform 0.2s ease, background 0.2s ease;
+}
+
+.fix-toggle.active {
+  background: rgba(16, 185, 129, 0.25);
+  border-color: rgba(16, 185, 129, 0.5);
+}
+
+.fix-toggle.active .fix-toggle-knob {
+  transform: translateX(16px);
+  background: var(--accent-green);
+}
+
+.fix-toggle:hover {
+  border-color: var(--border-strong);
+}
+
+/* ================= Apply Button Group ================= */
+.apply-btn-group {
+  display: flex;
+  gap: 8px;
+}
+
+.apply-btn-group .btn-success {
+  flex: 1;
+}
+
+.apply-btn-group .btn-secondary {
+  flex: 0 0 auto;
+  width: auto;
+  padding: 10px 14px;
+}
+
 /* ================= Buttons & Actions ================= */
 .action-section {
   position: sticky;

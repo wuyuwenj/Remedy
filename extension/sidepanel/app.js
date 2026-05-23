@@ -14,6 +14,7 @@ const state = {
   suggestions: [],
   optimizations: [],
   postLoadScripts: [],
+  activeFixes: new Set(),
   lighthouseBefore: null,
   lighthouseAfter: null,
   error: null,
@@ -39,6 +40,7 @@ const els = {
   exportAllBtn:   document.getElementById('export-all-btn'),
   applySection:   document.getElementById('apply-section'),
   applyFixesBtn:  document.getElementById('apply-fixes-btn'),
+  clearFixesBtn:  document.getElementById('clear-fixes-btn'),
   viewReportLink: document.getElementById('view-report-link'),
   errorSection:   document.getElementById('error-section'),
   errorMessage:   document.getElementById('error-message'),
@@ -63,7 +65,8 @@ function init() {
   // Event listeners
   els.analyzeBtn.addEventListener('click', startAnalysis);
   els.testSelectedBtn.addEventListener('click', testSelected);
-  els.applyFixesBtn.addEventListener('click', applyFixes);
+  els.applyFixesBtn.addEventListener('click', applyAllFixes);
+  els.clearFixesBtn.addEventListener('click', clearAllFixes);
   els.retryBtn.addEventListener('click', startAnalysis);
   els.exportAllBtn.addEventListener('click', () => copyToClipboard(generateFullReport(), els.exportAllBtn));
 }
@@ -310,52 +313,90 @@ function getSelectedFixIds() {
 }
 
 // ---- Apply Fixes ----
-async function applyFixes() {
-  // Gather fix sources: optimizations first, then selected suggestions
-  let sources = state.optimizations;
-  if (sources.length === 0) {
-    const selectedIds = new Set(getSelectedFixIds());
-    sources = state.suggestions.filter((s) => selectedIds.has(s.id));
+
+function toggleFix(fixId) {
+  if (state.activeFixes.has(fixId)) {
+    state.activeFixes.delete(fixId);
+  } else {
+    state.activeFixes.add(fixId);
   }
+  updateToggleUI();
+  applyActiveFixes();
+}
 
-  const initScripts = sources.map((s) => s.initScript).filter(Boolean);
-  const postLoadScripts = state.postLoadScripts.length > 0
-    ? state.postLoadScripts
-    : sources.map((s) => s.postLoadScript).filter(Boolean);
+function applyAllFixes() {
+  const sources = state.optimizations.length > 0 ? state.optimizations : state.suggestions;
+  for (const s of sources) {
+    const id = s.id || s.fixId;
+    if (id) state.activeFixes.add(id);
+  }
+  updateToggleUI();
+  applyActiveFixes();
+}
 
-  if (initScripts.length === 0 && postLoadScripts.length === 0) {
-    addLog('No fix scripts available to apply.', 'warning');
+function clearAllFixes() {
+  state.activeFixes.clear();
+  updateToggleUI();
+  chrome.runtime.sendMessage({ type: 'CLEAR_FIXES' }, () => {
+    addLog('All fixes cleared.', 'step');
+    updateApplyButton();
+  });
+}
+
+function updateToggleUI() {
+  els.optimizationList.querySelectorAll('.fix-toggle').forEach((toggle) => {
+    const id = toggle.dataset.fixId;
+    toggle.classList.toggle('active', state.activeFixes.has(id));
+  });
+  updateApplyButton();
+}
+
+function updateApplyButton() {
+  const count = state.activeFixes.size;
+  if (count > 0) {
+    els.applyFixesBtn.innerHTML = `
+      <svg class="btn-icon" width="16" height="16" viewBox="0 0 16 16" fill="none">
+        <path d="M13.5 4.5l-7 7L3 8" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+      </svg>
+      ${count} Fix${count > 1 ? 'es' : ''} Active`;
+    els.applyFixesBtn.style.background = 'linear-gradient(135deg, #16a34a, #15803d)';
+    els.clearFixesBtn.classList.remove('hidden');
+  } else {
+    els.applyFixesBtn.innerHTML = `
+      <svg class="btn-icon" width="16" height="16" viewBox="0 0 16 16" fill="none">
+        <path d="M13.5 4.5l-7 7L3 8" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+      </svg>
+      Apply All Fixes`;
+    els.applyFixesBtn.style.background = '';
+    els.clearFixesBtn.classList.add('hidden');
+  }
+}
+
+function applyActiveFixes() {
+  const sources = state.optimizations.length > 0 ? state.optimizations : state.suggestions;
+  const active = sources.filter((s) => state.activeFixes.has(s.id || s.fixId));
+
+  if (active.length === 0) {
+    chrome.runtime.sendMessage({ type: 'CLEAR_FIXES' });
+    addLog('All fixes removed.', 'step');
     return;
   }
 
-  addLog(`Applying ${initScripts.length} init script(s) + ${postLoadScripts.length} post-load script(s)...`, 'step');
+  const initScripts = active.map((s) => s.initScript).filter(Boolean);
+  const postLoadScripts = active.map((s) => s.postLoadScript).filter(Boolean);
 
-  els.applyFixesBtn.disabled = true;
-  els.applyFixesBtn.innerHTML = '<span class="spinner"></span> Applying...';
+  addLog(`Applying ${active.length} fix(es)...`, 'step');
 
   chrome.runtime.sendMessage(
     { type: 'APPLY_FIXES', initScripts, postLoadScripts },
     (response) => {
-      els.applyFixesBtn.disabled = false;
       if (response?.success) {
-        els.applyFixesBtn.innerHTML = `
-          <svg class="btn-icon" width="16" height="16" viewBox="0 0 16 16" fill="none">
-            <path d="M13.5 4.5l-7 7L3 8" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-          </svg>
-          Fixes Applied!`;
-        els.applyFixesBtn.style.background = 'linear-gradient(135deg, #16a34a, #15803d)';
         if (response?.reloading) {
-          addLog('Fixes registered — page is reloading with initScripts applied before page scripts.', 'success');
+          addLog('Page reloading with selected fixes applied.', 'success');
         } else {
-          addLog('Fixes applied to page successfully.', 'success');
+          addLog(`${active.length} fix(es) applied.`, 'success');
         }
-        addLog('Fixes will persist across refreshes. Use "Clear Fixes" to remove.', 'step');
       } else {
-        els.applyFixesBtn.innerHTML = `
-          <svg class="btn-icon" width="16" height="16" viewBox="0 0 16 16" fill="none">
-            <path d="M13.5 4.5l-7 7L3 8" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-          </svg>
-          Apply Fixes to Page`;
         addLog(`Failed to apply fixes: ${response?.error || 'Unknown error'}`, 'error');
       }
     }
@@ -511,10 +552,17 @@ function renderOptimization(opt) {
     comparisonHtml = `<div class="opt-metrics"><span class="opt-metric">${escapeHtml(opt.improvement)}</span></div>`;
   }
 
+  const fixId = opt.id || opt.fixId || `fix-${Math.random().toString(36).slice(2, 8)}`;
+  const isActive = state.activeFixes.has(fixId);
+
   row.innerHTML = `
     <div class="opt-header">
       <span class="opt-title">${escapeHtml(opt.title || opt.name || 'Fix')}</span>
-      <span class="opt-status ${status}">${status}</span>
+      <div class="opt-header-actions">
+        <span class="fix-toggle ${isActive ? 'active' : ''}" data-fix-id="${fixId}" title="Toggle this fix on/off">
+          <span class="fix-toggle-knob"></span>
+        </span>
+      </div>
     </div>
     <div class="opt-detail">${escapeHtml(opt.detail || opt.explanation || opt.description || '')}</div>
     ${comparisonHtml}
@@ -525,6 +573,8 @@ function renderOptimization(opt) {
       </svg>
       Copy as Prompt
     </button>`;
+
+  row.querySelector('.fix-toggle').addEventListener('click', () => toggleFix(fixId));
 
   const copyBtn = row.querySelector('.btn-copy-prompt');
   copyBtn.addEventListener('click', () => copyToClipboard(generateFixPrompt(opt), copyBtn));
@@ -704,6 +754,7 @@ function resetUI() {
   state.suggestions = [];
   state.optimizations = [];
   state.postLoadScripts = [];
+  state.activeFixes.clear();
   state.lighthouseBefore = null;
   state.lighthouseAfter = null;
   state.error = null;
@@ -718,6 +769,8 @@ function resetUI() {
   els.suggestionCount.textContent = '0';
   els.testSelectedBtn.classList.add('hidden');
   els.exportAllBtn.classList.add('hidden');
+  els.clearFixesBtn.classList.add('hidden');
+  state.activeFixes.clear();
 
   hideSection(els.agentLogSection);
   hideSection(els.metricsSection);
