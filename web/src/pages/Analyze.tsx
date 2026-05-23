@@ -26,6 +26,7 @@ export default function Analyze() {
   const [optimizations, setOptimizations] = useState<OptimizationResult[]>([]);
   const [totalImprovement, setTotalImprovement] = useState<string | null>(null);
   const [isComplete, setIsComplete] = useState(false);
+  const [baselineDone, setBaselineDone] = useState(false);
   const [isApplying, setIsApplying] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
@@ -63,6 +64,15 @@ export default function Analyze() {
               `Tested: ${event.data.name} (${event.data.improvement})`,
             ]);
             break;
+
+          case 'done':
+            // Baseline phase finished: metrics + suggestions are ready and we're
+            // now waiting for the user to select fixes. Stops the "Analyzing..."
+            // indicator (the optimize phase emits 'complete' later).
+            setBaselineDone(true);
+            setStatusLog((prev) => [...prev, 'Baseline complete — select fixes to test']);
+            break;
+
           case 'complete':
             setTotalImprovement(event.data?.totalImprovement ?? null);
             setIsComplete(true);
@@ -174,7 +184,7 @@ export default function Analyze() {
             Back
           </a>
           <h1 className="text-3xl font-semibold tracking-tight text-gradient">
-            Analyzing...
+            {isComplete || baselineDone ? 'Analysis Ready' : 'Analyzing...'}
           </h1>
         </div>
 

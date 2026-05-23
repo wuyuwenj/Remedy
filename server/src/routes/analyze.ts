@@ -63,6 +63,8 @@ router.post('/analyze', async (req: Request, res: Response) => {
       // Close the MCP client after baseline is done
       const { closeMcpClient } = await import('../mcp/client.js');
       await closeMcpClient(mcpClient);
+
+      emit({ type: 'done', data: { suggestions, metrics: baseline } });
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       session.status = 'error';

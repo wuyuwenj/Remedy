@@ -12,6 +12,47 @@ function buildChildEnv(): Record<string, string> {
   return env;
 }
 
+type ToolLogger = (toolName: string, args: Record<string, unknown>) => void;
+
+let _onToolCall: ToolLogger | null = null;
+
+export function setToolCallLogger(logger: ToolLogger): void {
+  _onToolCall = logger;
+}
+
+function resultText(result: any): string {
+  if (Array.isArray(result?.content)) {
+    return result.content
+      .filter((c: any) => c?.type === 'text')
+      .map((c: any) => c.text)
+      .join(' ');
+  }
+  return typeof result?.content === 'string' ? result.content : '';
+}
+
+// Calls an MCP tool: notifies the registered UI logger (for in-app status), then
+// runs it with console timing + error logging so backend progress is visible.
+async function callTool(
+  client: Client,
+  name: string,
+  args: Record<string, unknown>
+): Promise<any> {
+  if (_onToolCall) _onToolCall(name, args);
+  console.log(`[MCP] → ${name} ${JSON.stringify(args).slice(0, 160)}`);
+  const start = Date.now();
+  const result: any = await client.callTool({ name, arguments: args });
+  const ms = Date.now() - start;
+  const text = resultText(result);
+  // navigate failures come back as a result (isError or "Error: ..." text), not a throw
+  const looksError = result?.isError === true || /^\s*Error[:\s]/i.test(text);
+  if (looksError) {
+    console.warn(`[MCP] ✗ ${name} failed in ${ms}ms — ${text.slice(0, 300)}`);
+  } else {
+    console.log(`[MCP] ✓ ${name} in ${ms}ms (${text.length} chars)`);
+  }
+  return result;
+}
+
 export async function createMcpClient(): Promise<Client> {
   const mcpPackage = process.env.CHROME_DEVTOOLS_MCP_PACKAGE ?? 'chrome-devtools-mcp@latest';
   const transport = new StdioClientTransport({
@@ -39,57 +80,47 @@ export async function createMcpClient(): Promise<Client> {
   return client;
 }
 
-export async function navigatePage(
+const TRACE_NAV_TIMEOUT_MS = process.env.TRACE_NAV_TIMEOUT_MS
+  ? parseInt(process.env.TRACE_NAV_TIMEOUT_MS, 10)
+  : 25_000;
+const TRACE_SETTLE_MS = 3_000;
+
+// Captures a performance trace for `url`. We drive the page load ourselves
+// (start trace without reload, then navigate_page) so the load wait uses
+// navigate_page's lenient, configurable timeout instead of
+// performance_start_trace's hardcoded 10s reload — which heavy pages exceed and
+// which *throws*, losing the trace entirely. Light pages still finish in a few
+// seconds because navigate_page returns as soon as the network goes idle; heavy
+// pages that never idle return at navTimeoutMs, by which point LCP/CLS have
+// already been recorded into the running trace. The about:blank step makes this
+// a clean cold load (vs. the old warm reload).
+export async function captureTrace(
   client: Client,
   url: string,
-  initScript?: string
+  initScript?: string,
+  navTimeoutMs: number = TRACE_NAV_TIMEOUT_MS
 ): Promise<any> {
-  const args: Record<string, unknown> = { url, type: 'url' };
+  await callTool(client, 'navigate_page', { url: 'about:blank', type: 'url' });
+  await callTool(client, 'performance_start_trace', { reload: false, autoStop: false });
+
+  const navArgs: Record<string, unknown> = { url, type: 'url', timeout: navTimeoutMs };
   if (initScript) {
-    args.initScript = initScript;
+    navArgs.initScript = initScript;
   }
-  const result = await client.callTool({ name: 'navigate_page', arguments: args });
-  return result;
-}
+  await callTool(client, 'navigate_page', navArgs);
 
-export async function startTrace(client: Client): Promise<any> {
-  const result = await client.callTool({
-    name: 'performance_start_trace',
-    arguments: { reload: true, autoStop: true },
-  });
-  return result;
-}
+  // Let late LCP / layout shifts land in the trace before stopping.
+  await new Promise((resolve) => setTimeout(resolve, TRACE_SETTLE_MS));
 
-export async function stopTrace(client: Client): Promise<any> {
-  const result = await client.callTool({
-    name: 'performance_stop_trace',
-    arguments: {},
-  });
-  return result;
-}
-
-export async function analyzeTrace(client: Client): Promise<any> {
-  const result = await client.callTool({
-    name: 'performance_analyze_insight',
-    arguments: {},
-  });
-  return result;
+  return callTool(client, 'performance_stop_trace', {});
 }
 
 export async function takeScreenshot(client: Client): Promise<any> {
-  const result = await client.callTool({
-    name: 'take_screenshot',
-    arguments: {},
-  });
-  return result;
+  return callTool(client, 'take_screenshot', {});
 }
 
 export async function listNetworkRequests(client: Client): Promise<any> {
-  const result = await client.callTool({
-    name: 'list_network_requests',
-    arguments: {},
-  });
-  return result;
+  return callTool(client, 'list_network_requests', {});
 }
 
 export async function closeMcpClient(client: Client): Promise<void> {

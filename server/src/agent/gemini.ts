@@ -65,6 +65,8 @@ ${typeof networkData === 'string' ? networkData : JSON.stringify(networkData, nu
 
 Respond ONLY with the JSON object. No markdown, no code fences.`;
 
+  console.log(`[Gemini] → request model=${model} promptChars=${fullPrompt.length}`);
+  const start = Date.now();
   const response = await ai.models.generateContent({
     model,
     contents: fullPrompt,
@@ -72,8 +74,8 @@ Respond ONLY with the JSON object. No markdown, no code fences.`;
       responseMimeType: 'application/json',
     },
   });
-
   const text = extractResponseText(response);
+  console.log(`[Gemini] ← response in ${Date.now() - start}ms, ${text.length} chars`);
 
   try {
     const parsed = JSON.parse(text);
@@ -93,25 +95,31 @@ Respond ONLY with the JSON object. No markdown, no code fences.`;
       })),
     };
   } catch {
-    // Try to extract JSON from text that might have markdown fences
+    // Try to extract JSON from text that might have markdown fences or trailing
+    // content. JSON.parse here can also throw (e.g. truncated / extra data), so
+    // guard it and fall through to a clear error rather than a raw parser one.
     const match = text.match(/\{[\s\S]*\}/) ?? text.match(/\[[\s\S]*\]/);
     if (match) {
-      const parsed = JSON.parse(match[0]);
-      const suggestions: Suggestion[] = Array.isArray(parsed) ? parsed : parsed.suggestions ?? [];
-      return {
-        report: normalizeReport(Array.isArray(parsed) ? undefined : parsed.report),
-        suggestions: suggestions.map((s, i) => ({
-          id: s.id || `fix-${i + 1}`,
-          name: s.name || 'Unnamed optimization',
-          impact: s.impact || 'medium',
-          expectedImprovement: s.expectedImprovement || 'Unknown',
-          explanation: s.explanation || '',
-          evidence: s.evidence || '',
-          confidence: s.confidence || 'medium',
-          initScript: s.initScript || '',
-          postLoadScript: s.postLoadScript || '',
-        })),
-      };
+      try {
+        const parsed = JSON.parse(match[0]);
+        const suggestions: Suggestion[] = Array.isArray(parsed) ? parsed : parsed.suggestions ?? [];
+        return {
+          report: normalizeReport(Array.isArray(parsed) ? undefined : parsed.report),
+          suggestions: suggestions.map((s, i) => ({
+            id: s.id || `fix-${i + 1}`,
+            name: s.name || 'Unnamed optimization',
+            impact: s.impact || 'medium',
+            expectedImprovement: s.expectedImprovement || 'Unknown',
+            explanation: s.explanation || '',
+            evidence: s.evidence || '',
+            confidence: s.confidence || 'medium',
+            initScript: s.initScript || '',
+            postLoadScript: s.postLoadScript || '',
+          })),
+        };
+      } catch {
+        // fall through to the clear error below
+      }
     }
     console.error('[Gemini] Failed to parse response:', text.slice(0, 500));
     throw new Error('Failed to parse Gemini response as JSON');
