@@ -13,7 +13,7 @@ const model = process.env.GEMINI_MODEL ?? 'gemini-3.5-flash';
 const PERFORMANCE_PROMPT = `You are Remedy, an autonomous frontend and web performance evaluator. Analyze Chrome DevTools performance trace, network request data, and page evidence.
 
 Return a JSON object with a frontend/performance comparison and up to 5 optimization suggestions, ranked by expected impact on Core Web Vitals and user experience.
-Include visible UI/component analysis whenever evidence supports it: navigation/header, footer, hero area, CTAs/buttons, images/media, text contrast, spacing, sticky elements, layout shifts, and color/style changes that users can actually see.
+Keep the main suggestion strategy performance-first, like a production frontend performance audit: prioritize LCP resources, image/media loading, render-blocking CSS/JS, hydration/main-thread work, font loading, request weight, caching, and layout stability.
 
 Required shape:
 {
@@ -31,7 +31,7 @@ Required shape:
       "name": "Short description",
       "impact": "high" | "medium" | "low",
       "expectedImprovement": "LCP -40%",
-      "explanation": "Why this helps (2-3 sentences). If the change is visible, name the affected UI component and the expected visual difference.",
+      "explanation": "Why this helps (2-3 sentences), tied to trace or network evidence.",
       "evidence": "What trace/network/page evidence supports this.",
       "confidence": "high" | "medium" | "low",
       "initScript": "JavaScript that runs before page scripts to apply the fix",
@@ -46,6 +46,7 @@ Rules:
 - Only suggest frontend/client-side optimizations
 - If the main bottleneck is server-side (high TTFB), note it but don't generate a fix script for it
 - Scripts must be self-contained, no external dependencies
+- Do not prioritize cosmetic or layout-only UI changes unless the trace/network evidence shows they directly improve a measured performance issue.
 - Do not invent metrics. If exact values are missing, say what evidence is missing.
 - Include "goodEnough" items so the user sees what does not need work yet.`;
 
@@ -83,17 +84,7 @@ Respond ONLY with the JSON object. No markdown, no code fences.`;
     const suggestions: Suggestion[] = Array.isArray(parsed) ? parsed : parsed.suggestions ?? [];
     return {
       report: normalizeReport(Array.isArray(parsed) ? undefined : parsed.report),
-      suggestions: suggestions.map((s, i) => ({
-        id: s.id || `fix-${i + 1}`,
-        name: s.name || 'Unnamed optimization',
-        impact: s.impact || 'medium',
-        expectedImprovement: s.expectedImprovement || 'Unknown',
-        explanation: s.explanation || '',
-        evidence: s.evidence || '',
-        confidence: s.confidence || 'medium',
-        initScript: s.initScript || '',
-        postLoadScript: s.postLoadScript || '',
-      })),
+      suggestions: suggestions.map(normalizeSuggestion),
     };
   } catch {
     // Try to extract JSON from text that might have markdown fences or trailing
@@ -106,17 +97,7 @@ Respond ONLY with the JSON object. No markdown, no code fences.`;
         const suggestions: Suggestion[] = Array.isArray(parsed) ? parsed : parsed.suggestions ?? [];
         return {
           report: normalizeReport(Array.isArray(parsed) ? undefined : parsed.report),
-          suggestions: suggestions.map((s, i) => ({
-            id: s.id || `fix-${i + 1}`,
-            name: s.name || 'Unnamed optimization',
-            impact: s.impact || 'medium',
-            expectedImprovement: s.expectedImprovement || 'Unknown',
-            explanation: s.explanation || '',
-            evidence: s.evidence || '',
-            confidence: s.confidence || 'medium',
-            initScript: s.initScript || '',
-            postLoadScript: s.postLoadScript || '',
-          })),
+          suggestions: suggestions.map(normalizeSuggestion),
         };
       } catch {
         // fall through to the clear error below
@@ -150,6 +131,20 @@ function normalizeReport(value: any): AnalysisReport {
     improveNext: toStringArray(value?.improveNext),
     goodEnough: toStringArray(value?.goodEnough),
     missingEvidence: toStringArray(value?.missingEvidence),
+  };
+}
+
+function normalizeSuggestion(s: any, i: number): Suggestion {
+  return {
+    id: s.id || `fix-${i + 1}`,
+    name: s.name || 'Unnamed optimization',
+    impact: s.impact || 'medium',
+    expectedImprovement: s.expectedImprovement || 'Unknown',
+    explanation: s.explanation || '',
+    evidence: s.evidence || '',
+    confidence: s.confidence || 'medium',
+    initScript: s.initScript || '',
+    postLoadScript: s.postLoadScript || '',
   };
 }
 

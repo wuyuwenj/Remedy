@@ -413,30 +413,30 @@ function median(values: Array<number | undefined>): number | undefined {
 }
 
 // Runs captureTrace `samples` times and returns the per-metric median (to beat
-// down run-to-run network noise) plus the last run's screenshot.
+// down run-to-run network noise). The screenshot overlay uses the same median
+// values returned here so the screenshot labels match the result table.
 async function measureMedian(
   client: Client,
   url: string,
   initScript: string | undefined,
-  samples: number
+  samples: number,
+  fallbackMetrics?: Partial<BaselineResult>
 ): Promise<{ metrics: Partial<BaselineResult>; screenshot: string }> {
   const runs: Partial<BaselineResult>[] = [];
-  let screenshot = '';
   for (let i = 0; i < samples; i++) {
     const traceResult = await captureTrace(client, url, composeInitScript(initScript));
     const performanceResult = await readPerformanceMetrics(client);
     runs.push(parseMetrics(traceResult, performanceResult));
-    if (i === samples - 1) {
-      screenshot = await captureScreenshotWithOverlay(client, runs[runs.length - 1], initScript ? 'Treatment' : 'Original');
-    }
   }
+  const metrics = {
+    lcp: median(runs.map((r) => r.lcp)) ?? fallbackMetrics?.lcp,
+    cls: median(runs.map((r) => r.cls)) ?? fallbackMetrics?.cls,
+    inp: median(runs.map((r) => r.inp)) ?? fallbackMetrics?.inp,
+    ttfb: median(runs.map((r) => r.ttfb)) ?? fallbackMetrics?.ttfb,
+  };
+  const screenshot = await captureScreenshotWithOverlay(client, metrics, initScript ? 'Treatment' : 'Original');
   return {
-    metrics: {
-      lcp: median(runs.map((r) => r.lcp)),
-      cls: median(runs.map((r) => r.cls)),
-      inp: median(runs.map((r) => r.inp)),
-      ttfb: median(runs.map((r) => r.ttfb)),
-    },
+    metrics,
     screenshot,
   };
 }
@@ -476,7 +476,7 @@ export async function runOptimizations(
         await closeMcpClient(mcpClient);
       }
       mcpClient = await createMcpClient();
-      const control = await measureMedian(mcpClient, url, undefined, OPTIMIZATION_SAMPLES);
+      const control = await measureMedian(mcpClient, url, undefined, OPTIMIZATION_SAMPLES, baselineMetrics);
       const before = {
         lcp: control.metrics.lcp ?? baselineMetrics.lcp,
         cls: control.metrics.cls ?? baselineMetrics.cls,
@@ -522,12 +522,13 @@ export async function runOptimizations(
         name: fix.name,
         before: { lcp: before.lcp, cls: before.cls, inp: before.inp, ttfb: before.ttfb },
         after: {
-          lcp: afterMetrics.lcp ?? 0,
-          cls: afterMetrics.cls ?? 0,
-          inp: afterMetrics.inp ?? 0,
-          ttfb: afterMetrics.ttfb ?? 0,
+          lcp: afterMetrics.lcp,
+          cls: afterMetrics.cls,
+          inp: afterMetrics.inp,
+          ttfb: afterMetrics.ttfb,
         },
         improvement: improvementStr,
+        beforeScreenshot: control.screenshot,
         screenshot: treatment.screenshot,
         initScript: fix.initScript,
         postLoadScript: fix.postLoadScript,

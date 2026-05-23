@@ -82,6 +82,7 @@ export default function Report() {
   }
 
   const { baseline, optimizations, totalImprovement, url } = report;
+  const comparisonOptimization = optimizations[optimizations.length - 1];
 
   return (
     <main className="relative min-h-screen overflow-x-hidden">
@@ -199,8 +200,8 @@ export default function Report() {
               Visual Comparison
             </h2>
             <BeforeAfter
-              beforeScreenshot={baseline.screenshot}
-              afterScreenshot={optimizations[optimizations.length - 1]?.screenshot}
+              beforeScreenshot={comparisonOptimization?.beforeScreenshot ?? baseline.screenshot}
+              afterScreenshot={comparisonOptimization?.screenshot}
             />
           </div>
         )}

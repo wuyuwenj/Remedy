@@ -47,6 +47,7 @@ export interface OptimizationResult {
   before: Partial<BaselineResult>;
   after: Partial<BaselineResult>;
   improvement: string;
+  beforeScreenshot?: string;
   screenshot?: string;
   initScript: string;
   postLoadScript: string;

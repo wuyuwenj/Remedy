@@ -15,7 +15,7 @@ export function renderReportHtml(session: AnalysisSession): string {
   const suggestions = session.suggestions ?? [];
   const report = baseline?.report;
   const bestOptimization = pickBestOptimization(optimizations);
-  const visualFindings = getVisualFindings(session);
+  const comparisonOptimization = bestOptimization ?? optimizations.at(-1);
 
   return `<!doctype html>
 <html lang="en">
@@ -236,8 +236,8 @@ export function renderReportHtml(session: AnalysisSession): string {
     <section class="panel">
       <h2>Visual Comparison</h2>
       <div class="screens">
-        ${renderScreenshot('Original', baseline?.screenshot)}
-        ${renderScreenshot(bestOptimization ? `Best tested fix: ${bestOptimization.name}` : 'Latest tested fix', bestOptimization?.screenshot ?? optimizations.at(-1)?.screenshot)}
+        ${renderScreenshot(comparisonOptimization ? `Original control for: ${comparisonOptimization.name}` : 'Original', comparisonOptimization?.beforeScreenshot ?? baseline?.screenshot)}
+        ${renderScreenshot(comparisonOptimization ? `Applied fix: ${comparisonOptimization.name}` : 'Latest tested fix', comparisonOptimization?.screenshot ?? optimizations.at(-1)?.screenshot)}
       </div>
     </section>
 
@@ -257,21 +257,10 @@ export function renderReportHtml(session: AnalysisSession): string {
     </section>
 
     <section class="panel">
-      <h2>Visible UI Component Analysis</h2>
-      <p class="muted" style="margin-bottom:12px">These are user-visible components or style/layout changes inferred from the analysis and tested fix scripts. Use this with the screenshots above to judge whether a performance change also affects the page experience.</p>
-      ${renderVisualFindings(visualFindings)}
-    </section>
-
-    <section class="panel">
       <h2>Detected Issues And Suggested Fixes</h2>
       <div class="list">
-        ${suggestions.length > 0 ? suggestions.map(renderSuggestion).join('') : '<p class="muted">No suggestions recorded.</p>'}
+        ${suggestions.length > 0 ? suggestions.map((suggestion) => renderSuggestion(suggestion, optimizations.find((opt) => opt.id === suggestion.id))).join('') : '<p class="muted">No suggestions recorded.</p>'}
       </div>
-    </section>
-
-    <section class="panel">
-      <h2>Variation Details</h2>
-      ${optimizations.length > 0 ? optimizations.map((opt) => renderOptimizationDetails(opt, baseline)).join('') : '<p class="muted">No optimization variants have been tested yet.</p>'}
     </section>
 
     <section class="panel">
@@ -329,7 +318,8 @@ function renderMetricDelta(opt: OptimizationResult, key: MetricKey): string {
   return `<div>${formatMetric(key, before)} -> ${formatMetric(key, after)}</div><span class="delta ${direction}">${delta > 0 ? '-' : '+'}${Math.abs(delta).toFixed(1)}%</span>`;
 }
 
-function renderSuggestion(suggestion: Suggestion): string {
+function renderSuggestion(suggestion: Suggestion, optimization?: OptimizationResult): string {
+  const tested = optimization ? renderOptimizationTable([optimization]) : '<p class="muted">This fix has not been tested yet. Reload this report after testing completes to see paired metrics and screenshots.</p>';
   return `<div class="item">
     <div class="item-head">
       <h3>${escapeHtml(suggestion.name)}</h3>
@@ -338,115 +328,12 @@ function renderSuggestion(suggestion: Suggestion): string {
     <p>${escapeHtml(suggestion.explanation)}</p>
     ${suggestion.expectedImprovement ? `<p><strong>Expected impact:</strong> ${escapeHtml(suggestion.expectedImprovement)}</p>` : ''}
     ${suggestion.evidence ? `<p class="muted"><strong>Evidence:</strong> ${escapeHtml(suggestion.evidence)}</p>` : ''}
+    <div style="margin-top:12px">${tested}</div>
+    ${optimization ? `<div class="screens" style="margin-top:12px">
+      ${renderScreenshot(`Original control for: ${optimization.name}`, optimization.beforeScreenshot)}
+      ${renderScreenshot(`Applied fix: ${optimization.name}`, optimization.screenshot)}
+    </div>` : ''}
   </div>`;
-}
-
-type VisualFinding = {
-  component: string;
-  source: string;
-  visibleChange: string;
-  evidence: string;
-};
-
-function getVisualFindings(session: AnalysisSession): VisualFinding[] {
-  const findings: VisualFinding[] = [];
-
-  for (const item of session.baseline?.report?.frontendComparison ?? []) {
-    findings.push({
-      component: inferComponent(item),
-      source: 'Frontend comparison',
-      visibleChange: item,
-      evidence: 'Gemini frontend comparison',
-    });
-  }
-
-  for (const suggestion of session.suggestions ?? []) {
-    const text = [suggestion.name, suggestion.explanation, suggestion.evidence, suggestion.initScript, suggestion.postLoadScript].filter(Boolean).join(' ');
-    if (!looksVisual(text)) continue;
-    findings.push({
-      component: inferComponent(text),
-      source: suggestion.name,
-      visibleChange: summarizeVisibleChange(text),
-      evidence: suggestion.evidence || suggestion.explanation,
-    });
-  }
-
-  for (const optimization of session.optimizations ?? []) {
-    const text = [optimization.name, optimization.explanation, optimization.initScript, optimization.postLoadScript].filter(Boolean).join(' ');
-    if (!looksVisual(text)) continue;
-    findings.push({
-      component: inferComponent(text),
-      source: `Tested fix: ${optimization.name}`,
-      visibleChange: summarizeVisibleChange(text),
-      evidence: optimization.improvement,
-    });
-  }
-
-  const seen = new Set<string>();
-  return findings.filter((finding) => {
-    const key = `${finding.component}:${finding.source}:${finding.visibleChange}`;
-    if (seen.has(key)) return false;
-    seen.add(key);
-    return true;
-  }).slice(0, 12);
-}
-
-function renderVisualFindings(findings: VisualFinding[]): string {
-  if (findings.length === 0) {
-    return '<p class="muted">No visible UI component changes were identified from the available evidence.</p>';
-  }
-
-  return `<table>
-    <thead><tr><th>Component</th><th>Source</th><th>Visible Change</th><th>Evidence</th></tr></thead>
-    <tbody>
-      ${findings.map((finding) => `<tr>
-        <td><strong>${escapeHtml(finding.component)}</strong></td>
-        <td>${escapeHtml(finding.source)}</td>
-        <td>${escapeHtml(finding.visibleChange)}</td>
-        <td>${escapeHtml(finding.evidence)}</td>
-      </tr>`).join('')}
-    </tbody>
-  </table>`;
-}
-
-function looksVisual(text: string): boolean {
-  return /(nav|navbar|header|footer|hero|button|cta|color|contrast|layout|spacing|margin|padding|font|text|image|media|card|grid|sticky|fixed|sidebar|modal|form|input|above.?the.?fold|visible|visual)/i.test(text);
-}
-
-function inferComponent(text: string): string {
-  const checks: Array<[RegExp, string]> = [
-    [/nav|navbar|header|top bar/i, 'Navigation / header'],
-    [/footer/i, 'Footer'],
-    [/hero|above.?the.?fold/i, 'Hero / above-the-fold area'],
-    [/button|cta|call.?to.?action/i, 'CTA / button'],
-    [/image|img|picture|media|video/i, 'Image / media'],
-    [/card|grid|list/i, 'Card/grid layout'],
-    [/form|input|field|select/i, 'Form controls'],
-    [/font|text|heading|copy|contrast/i, 'Text / typography'],
-    [/sticky|fixed|sidebar/i, 'Sticky/fixed layout'],
-    [/color|background|theme/i, 'Color / visual styling'],
-    [/spacing|margin|padding|layout/i, 'Layout spacing'],
-  ];
-  return checks.find(([regex]) => regex.test(text))?.[1] ?? 'Visible page component';
-}
-
-function summarizeVisibleChange(text: string): string {
-  const cleaned = text.replace(/\s+/g, ' ').trim();
-  if (cleaned.length <= 220) return cleaned;
-  return `${cleaned.slice(0, 220)}...`;
-}
-
-function renderOptimizationDetails(opt: OptimizationResult, baseline?: BaselineResult): string {
-  return `<details>
-    <summary>${escapeHtml(opt.name)} - ${escapeHtml(opt.improvement)}</summary>
-    <p style="margin-top:10px">${escapeHtml(opt.explanation)}</p>
-    <div class="screens" style="margin-top:12px">
-      ${renderScreenshot('Original', baseline?.screenshot)}
-      ${renderScreenshot(opt.name, opt.screenshot)}
-    </div>
-    <h3 style="margin-top:14px">Measured Metrics</h3>
-    ${renderOptimizationTable([opt])}
-  </details>`;
 }
 
 function renderReportList(title: string, items: string[] | undefined): string {
