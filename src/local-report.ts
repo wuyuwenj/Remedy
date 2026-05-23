@@ -7,7 +7,6 @@ import { basename, relative, resolve } from "node:path";
 type Rating = "good" | "needs-improvement" | "poor" | "unknown";
 type Severity = "critical" | "high" | "medium" | "low";
 type Direction = "improved" | "regressed" | "unchanged" | "unknown";
-type ScreenshotMode = "visual" | "performance";
 
 function log(message: string): void {
   console.error(`[remedy] ${message}`);
@@ -63,6 +62,19 @@ type Issue = {
   confidence: "high" | "medium" | "low";
 };
 
+type SuggestionCode = {
+  language?: string;
+  before?: string;
+  after: string;
+};
+
+type SuggestionComparison = {
+  metric?: string;
+  before?: string;
+  after?: string;
+  summary?: string;
+};
+
 type Suggestion = {
   id: string;
   title: string;
@@ -71,6 +83,8 @@ type Suggestion = {
   recommendation: string;
   implementationNotes: string;
   confidence: "high" | "medium" | "low";
+  code?: SuggestionCode;
+  comparison?: SuggestionComparison;
 };
 
 type VariantPlan = {
@@ -92,8 +106,6 @@ type RunResult = {
   kind: "baseline" | "variation";
   timestamp: string;
   screenshot?: string;
-  statsScreenshot?: string;
-  screenshotMode: ScreenshotMode;
   tracePath?: string;
   snapshotPath?: string;
   lighthouseDir?: string;
@@ -253,8 +265,7 @@ export async function generateLocalHtmlReport(options: LocalReportOptions): Prom
     id: "baseline",
     label: "Original",
     kind: "baseline",
-    runLighthouse: true,
-    screenshotMode: "visual"
+    runLighthouse: true
   });
 
   log("Requesting analysis and safe variations from Gemini");
@@ -323,7 +334,6 @@ async function collectRun(args: {
   initScript?: string;
   postLoadScript?: string;
   runLighthouse: boolean;
-  screenshotMode: ScreenshotMode;
 }): Promise<RunResult> {
   const notes: string[] = [];
   const screenshotPath = resolve(args.assetsDir, `${args.id}.png`);
@@ -359,27 +369,32 @@ async function collectRun(args: {
     filePath: snapshotPath
   });
 
-  const screenshotResult = await callToolSafe(args.client, "take_screenshot", {
-    filePath: screenshotPath,
-    format: "png"
-  });
-
   let lighthouseText = "";
   if (args.runLighthouse && args.lighthouseDir) {
-    const lighthouseResult = await callToolSafe(args.client, "lighthouse_audit", {
-      mode: "navigation",
-      device: "desktop",
-      outputDirPath: args.lighthouseDir
-    });
+    // Lighthouse runs a full navigation audit and regularly needs longer than the MCP
+    // 60s default request timeout, which is what was killing it. Give it room and reset
+    // the timer while it streams progress so a slow-but-healthy audit still completes.
+    log(`Running Lighthouse audit for ${args.label} (this can take a minute)`);
+    const lighthouseResult = await callToolSafe(
+      args.client,
+      "lighthouse_audit",
+      { mode: "navigation", device: "desktop", outputDirPath: args.lighthouseDir },
+      { timeout: 180000, resetTimeoutOnProgress: true }
+    );
     lighthouseText = extractText(lighthouseResult);
+    if (!/\bscore\b/i.test(lighthouseText) && /\b(failed?|timed?\s*out|timeout|error)\b/i.test(lighthouseText)) {
+      log(`Lighthouse audit did not complete cleanly: ${lighthouseText.slice(0, 160)}`);
+      notes.push(`Lighthouse audit issue: ${lighthouseText.slice(0, 240)}`);
+    }
   }
 
   log(`Running performance trace for ${args.label}`);
-  const traceResult = await callToolSafe(args.client, "performance_start_trace", {
-    reload: true,
-    autoStop: true,
-    filePath: tracePath
-  });
+  const traceResult = await callToolSafe(
+    args.client,
+    "performance_start_trace",
+    { reload: true, autoStop: true, filePath: tracePath },
+    { timeout: 120000, resetTimeoutOnProgress: true }
+  );
   await delay(2500);
 
   const networkResult = await callToolSafe(args.client, "list_network_requests", {
@@ -396,15 +411,9 @@ async function collectRun(args: {
   const networkText = extractText(networkResult);
   const consoleText = extractText(consoleResult);
   const performanceText = extractText(performanceResult);
-
-  const screenshotText = extractText(screenshotResult);
   const snapshotText = extractText(snapshotResult);
-  const screenshot = fileIfExists(args.outputDir, screenshotPath);
   const snapshot = fileIfExists(args.outputDir, snapshotPath);
   const trace = fileIfExists(args.outputDir, tracePath);
-  if (!screenshot) {
-    notes.push(`Screenshot missing. Tool output: ${screenshotText.slice(0, 300) || "empty response"}`);
-  }
   if (!trace) {
     notes.push("Trace artifact file was not written; using returned trace text only.");
   }
@@ -412,23 +421,32 @@ async function collectRun(args: {
     notes.push(`Snapshot saved: ${basename(snapshotPath)}`);
   }
 
-  const metrics = parseMetrics([traceText, lighthouseText, performanceText, networkText].join("\n\n"));
+  // Prefer the deterministic Performance API reading over scraping numbers out of free
+  // text; the regex fallback is what produced nonsense like "REQUESTS 1 -> 869".
+  const metrics = parseMetrics(performanceText, [traceText, lighthouseText, networkText].join("\n\n"));
 
-  // Capture a DevTools-style Core Web Vitals overlay so performance-only changes
-  // (which leave the page looking identical) still produce a meaningful "stat panel"
-  // screenshot. Done last so it never affects the trace or network measurements.
-  log(`Capturing performance stat overlay for ${args.label}`);
-  const statsScreenshotPath = resolve(args.assetsDir, `${args.id}-stats.png`);
+  // The trace reloads the page and discards post-load mutations, so re-apply the fix
+  // before the final shot. Then paint a DevTools-style Core Web Vitals panel so every
+  // comparison image shows both the visual state and the measured metrics in one frame.
+  if (args.postLoadScript?.trim()) {
+    await callToolSafe(args.client, "evaluate_script", {
+      function: wrapScriptAsFunction(args.postLoadScript)
+    });
+    await delay(300);
+  }
+  log(`Capturing screenshot with metric overlay for ${args.label}`);
   await callToolSafe(args.client, "evaluate_script", {
     function: statsOverlayScript(metrics, args.label)
   });
-  await callToolSafe(args.client, "take_screenshot", {
-    filePath: statsScreenshotPath,
-    format: "png"
+  const screenshotResult = await callToolSafe(args.client, "take_screenshot", {
+    filePath: screenshotPath,
+    format: "png",
+    fullPage: false
   });
-  const statsScreenshot = fileIfExists(args.outputDir, statsScreenshotPath);
-  if (!statsScreenshot) {
-    notes.push("Performance stat overlay screenshot was not written.");
+  const screenshotText = extractText(screenshotResult);
+  const screenshot = fileIfExists(args.outputDir, screenshotPath);
+  if (!screenshot) {
+    notes.push(`Screenshot missing. Tool output: ${screenshotText.slice(0, 300) || "empty response"}`);
   }
 
   return {
@@ -437,8 +455,6 @@ async function collectRun(args: {
     kind: args.kind,
     timestamp: new Date().toISOString(),
     screenshot,
-    statsScreenshot,
-    screenshotMode: args.screenshotMode,
     tracePath: trace,
     snapshotPath: snapshot,
     lighthouseDir: args.lighthouseDir ? toReportPath(args.outputDir, args.lighthouseDir) : undefined,
@@ -464,11 +480,7 @@ async function collectVariants(args: {
   let index = 0;
   for (const plan of args.plans) {
     index += 1;
-    const screenshotMode = classifyScreenshotMode(plan.changes);
-    log(
-      `Testing variation ${index}/${args.plans.length}: ${plan.name} ` +
-        `[${screenshotMode === "performance" ? "stat-panel" : "visual"} screenshot]`
-    );
+    log(`Testing variation ${index}/${args.plans.length}: ${plan.name}`);
     const run = await collectRun({
       client: args.client,
       targetUrl: args.targetUrl,
@@ -479,8 +491,7 @@ async function collectVariants(args: {
       kind: "variation",
       initScript: plan.initScript,
       postLoadScript: plan.postLoadScript,
-      runLighthouse: false,
-      screenshotMode
+      runLighthouse: false
     });
 
     const deltas = compareMetrics(args.baselineMetrics, run.metrics);
@@ -556,7 +567,18 @@ Return ONLY JSON in this exact shape:
       "expectedImpact": "...",
       "recommendation": "...",
       "implementationNotes": "...",
-      "confidence": "high" | "medium" | "low"
+      "confidence": "high" | "medium" | "low",
+      "code": {
+        "language": "html" | "css" | "javascript" | "jsx" | "tsx" | "json" | "nginx" | "diff",
+        "before": "Exact current code/markup if it can be inferred from evidence, else omit.",
+        "after": "Exact, copy-pasteable code that implements this fix. Self-contained and ready to paste."
+      },
+      "comparison": {
+        "metric": "The single metric this most affects, e.g. LCP.",
+        "before": "Observed baseline value for that metric (use the BASELINE METRICS provided), e.g. 3.2s.",
+        "after": "Expected value after the fix, clearly an estimate, e.g. ~1.9s (est.).",
+        "summary": "One sentence on the expected before/after change and why."
+      }
     }
   ],
   "variations": [
@@ -572,6 +594,8 @@ Return ONLY JSON in this exact shape:
 }
 
 Create at most ${maxVariants} safe visual variations. Focus on reversible CSS/DOM changes such as button color/contrast, spacing, layout stability, image sizing, or hiding non-essential motion. Do not click, submit forms, sign in, purchase, or modify storage. If the evidence is too weak for custom variants, return generic but useful CSS-only variations.
+
+For every suggestion, fill "code" with an exact, copy-pasteable snippet that implements the fix (the developer should be able to paste it with no edits), and fill "comparison" so the report can show a before/after for that fix. Set comparison.before from the observed BASELINE METRICS below and mark comparison.after explicitly as an estimate. Do not invent observed metrics; estimates must be labelled as such.
 
 === BASELINE METRICS ===
 ${JSON.stringify(baseline.metrics, null, 2)}
@@ -610,9 +634,14 @@ ${truncateForPrompt(baseline.performanceText)}
   }
 }
 
-async function callToolSafe(client: Client, name: string, arguments_: Record<string, unknown>): Promise<unknown> {
+async function callToolSafe(
+  client: Client,
+  name: string,
+  arguments_: Record<string, unknown>,
+  options?: { timeout?: number; resetTimeoutOnProgress?: boolean }
+): Promise<unknown> {
   try {
-    return await client.callTool({ name, arguments: arguments_ });
+    return await client.callTool({ name, arguments: arguments_ }, undefined, options);
   } catch (error) {
     return {
       content: [
@@ -659,22 +688,27 @@ function extractText(value: unknown): string {
   }
 }
 
-function parseMetrics(text: string): MetricMap {
-  const performanceJson = parsePerformanceJson(text);
-  const lcp = firstMetric(text, ["LCP", "Largest Contentful Paint"]);
-  const cls = firstMetric(text, ["CLS", "Cumulative Layout Shift"]);
-  const inp = firstMetric(text, ["INP", "Interaction to Next Paint"]);
-  const ttfb = firstMetric(text, ["TTFB", "Time to First Byte"]);
-  const fcp = firstMetric(text, ["FCP", "First Contentful Paint"]);
-  const load = performanceJson?.loadEventEnd;
-  const requestCount = firstCount(text, ["requestCount", "requests"]) ?? performanceJson?.resourceCount;
+function parseMetrics(performanceText: string, otherText = ""): MetricMap {
+  // The Performance API reading is deterministic and measured the same way for every
+  // run, so prefer it. Only scrape numbers out of free text when a value is genuinely
+  // missing — the loose text regex is what produced "REQUESTS 1 -> 869".
+  const perf = parsePerformanceJson(performanceText) ?? parsePerformanceJson(otherText);
+  const combined = `${performanceText}\n\n${otherText}`;
+
+  const lcp = perf?.lcp ?? firstMetric(combined, ["LCP", "Largest Contentful Paint"]);
+  const cls = perf?.cls ?? firstMetric(combined, ["CLS", "Cumulative Layout Shift"]);
+  const inp = firstMetric(combined, ["INP", "Interaction to Next Paint"]);
+  const ttfb = perf?.ttfb ?? firstMetric(combined, ["TTFB", "Time to First Byte"]);
+  const fcp = perf?.firstContentfulPaint ?? firstMetric(combined, ["FCP", "First Contentful Paint"]);
+  const load = perf?.loadEventEnd && perf.loadEventEnd > 0 ? perf.loadEventEnd : undefined;
+  const requestCount = perf?.resourceCount ?? firstCount(combined, ["resourceCount", "requestCount"]);
 
   return {
     lcp: lcp == null ? undefined : msMetric("LCP", lcp, rateLcp(lcp)),
     cls: cls == null ? undefined : unitlessMetric(cls, rateCls(cls)),
     inp: inp == null ? undefined : msMetric("INP", inp, rateInp(inp)),
-    ttfb: ttfb == null ? maybeMsMetric(performanceJson?.ttfb, rateTtfb) : msMetric("TTFB", ttfb, rateTtfb(ttfb)),
-    fcp: fcp == null ? maybeMsMetric(performanceJson?.firstContentfulPaint, rateFcp) : msMetric("FCP", fcp, rateFcp(fcp)),
+    ttfb: ttfb == null ? undefined : msMetric("TTFB", ttfb, rateTtfb(ttfb)),
+    fcp: fcp == null ? undefined : msMetric("FCP", fcp, rateFcp(fcp)),
     load: load == null ? undefined : msMetric("Load", load, load < 3000 ? "good" : load < 6000 ? "needs-improvement" : "poor"),
     requests: requestCount == null ? undefined : {
       value: requestCount,
@@ -721,6 +755,8 @@ function firstCount(text: string, labels: string[]): number | undefined {
 function parsePerformanceJson(text: string): {
   ttfb?: number;
   firstContentfulPaint?: number;
+  lcp?: number;
+  cls?: number;
   loadEventEnd?: number;
   resourceCount?: number;
 } | undefined {
@@ -733,6 +769,8 @@ function parsePerformanceJson(text: string): {
     return {
       ttfb: toNumber(parsed.navigation?.responseStart),
       firstContentfulPaint: toNumber(parsed.paints?.["first-contentful-paint"]),
+      lcp: toNumber(parsed.lcp),
+      cls: toNumber(parsed.cls),
       loadEventEnd: toNumber(parsed.navigation?.loadEventEnd),
       resourceCount: toNumber(parsed.resourceCount)
     };
@@ -752,10 +790,6 @@ function msMetric(label: string, value: number, rating: Rating): MetricValue {
     display: formatMs(label, value),
     rating
   };
-}
-
-function maybeMsMetric(value: number | undefined, rater: (value: number) => Rating): MetricValue | undefined {
-  return value == null ? undefined : msMetric("", value, rater(value));
 }
 
 function unitlessMetric(value: number, rating: Rating): MetricValue {
@@ -902,7 +936,17 @@ function fallbackGeminiPlan(baseline: RunResult, maxVariants: number, note?: str
         expectedImpact: "Improves confidence in visual and metric deltas.",
         recommendation: "Use --viewport, then compare original and variant screenshots before making code changes.",
         implementationNotes: "The generated HTML report already stores screenshots and metric deltas for this workflow.",
-        confidence: "high"
+        confidence: "high",
+        code: {
+          language: "bash",
+          after: "npm run dev -- --url \"<your-url>\" --html-report --viewport 1366x768 --max-variants 2"
+        },
+        comparison: {
+          metric: "Run stability",
+          before: "Variable viewport",
+          after: "Fixed 1366x768 (est.)",
+          summary: "A fixed viewport makes screenshot and metric comparisons repeatable between runs."
+        }
       }
     ],
     variations: DEFAULT_VARIANTS.slice(0, maxVariants)
@@ -949,8 +993,39 @@ function normalizeSuggestion(value: Partial<Suggestion>, index: number): Suggest
     expectedImpact: stringOr(value.expectedImpact, "Unknown"),
     recommendation: stringOr(value.recommendation, ""),
     implementationNotes: stringOr(value.implementationNotes, ""),
-    confidence: confidenceOr(value.confidence, "medium")
+    confidence: confidenceOr(value.confidence, "medium"),
+    code: normalizeSuggestionCode(value.code),
+    comparison: normalizeSuggestionComparison(value.comparison)
   };
+}
+
+function normalizeSuggestionCode(value: SuggestionCode | undefined): SuggestionCode | undefined {
+  const after = typeof value?.after === "string" ? value.after.trim() : "";
+  if (!after) {
+    return undefined;
+  }
+  return {
+    language: typeof value?.language === "string" && value.language.trim() ? value.language.trim() : undefined,
+    before: typeof value?.before === "string" && value.before.trim() ? value.before : undefined,
+    after
+  };
+}
+
+function normalizeSuggestionComparison(value: SuggestionComparison | undefined): SuggestionComparison | undefined {
+  if (!value) {
+    return undefined;
+  }
+  const comparison: SuggestionComparison = {
+    metric: stringOrUndefined(value.metric),
+    before: stringOrUndefined(value.before),
+    after: stringOrUndefined(value.after),
+    summary: stringOrUndefined(value.summary)
+  };
+  return comparison.metric || comparison.before || comparison.after || comparison.summary ? comparison : undefined;
+}
+
+function stringOrUndefined(value: unknown): string | undefined {
+  return typeof value === "string" && value.trim() ? value.trim() : undefined;
 }
 
 function mergeScores(scores: GeminiPlan["scores"], baseline: RunResult): GeminiPlan["scores"] {
@@ -1083,6 +1158,20 @@ function renderHtml(report: StaticReport): string {
     details:first-child { border-top: 0; }
     summary { cursor: pointer; font-weight: 750; }
     pre { white-space: pre-wrap; overflow-wrap: anywhere; background: #f1f4f9; border: 1px solid var(--line); border-radius: 6px; padding: 12px; max-height: 260px; overflow: auto; }
+    .code { margin-top: 12px; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; background: #0b1020; }
+    .code-head { display: flex; align-items: center; justify-content: space-between; padding: 8px 12px; background: #131a2e; }
+    .code-lang { color: #9aa4b2; font-size: 12px; text-transform: uppercase; letter-spacing: .05em; font-weight: 700; }
+    .copy { cursor: pointer; border: 1px solid #2c3a5e; background: #1d2742; color: #dbe4f5; border-radius: 6px; padding: 4px 12px; font-size: 12px; font-weight: 650; }
+    .copy:hover { background: #27345a; }
+    .code .code-tag { color: #9aa4b2; font-size: 11px; text-transform: uppercase; letter-spacing: .05em; padding: 8px 12px 0; }
+    .code pre { margin: 8px 12px 12px; background: #0b1020; color: #e6edf6; border: 0; border-radius: 6px; padding: 12px; font: 12px/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+    .code pre.before { color: #f1a8a3; }
+    .cmp { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; margin-top: 12px; }
+    .cmp-cell { border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; background: var(--bg); }
+    .cmp-label { display: block; color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: .04em; font-weight: 700; }
+    .cmp-val { display: block; margin-top: 4px; font-weight: 700; font-size: 15px; }
+    .cmp-cell:last-child .cmp-val { color: var(--good); }
+    @media (max-width: 640px) { .cmp { grid-template-columns: 1fr; } }
     @media (max-width: 900px) {
       .score-grid, .metric-grid, .screens { grid-template-columns: 1fr; }
       main { padding: 22px 14px 40px; }
@@ -1095,6 +1184,20 @@ function renderHtml(report: StaticReport): string {
   <script>
     const report = JSON.parse(document.getElementById("report-data").textContent);
     const app = document.getElementById("app");
+    function copyCode(btn) {
+      const wrap = btn.closest(".code");
+      const pre = wrap && (wrap.querySelector("[data-copy]") || wrap.querySelector("pre"));
+      if (!pre) return;
+      const done = () => { const t = btn.textContent; btn.textContent = "Copied"; setTimeout(() => { btn.textContent = t; }, 1200); };
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(pre.textContent).then(done).catch(() => {});
+      } else {
+        const r = document.createRange(); r.selectNode(pre);
+        const sel = getSelection(); sel.removeAllRanges(); sel.addRange(r);
+        try { document.execCommand("copy"); done(); } catch (e) {}
+        sel.removeAllRanges();
+      }
+    }
     const esc = (value) => String(value ?? "").replace(/[&<>"']/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[char]));
     const pill = (label, tone = "unknown") => '<span class="pill ' + esc(tone) + '">' + esc(label) + '</span>';
     const metricCard = ([key, metric]) => metric ? '<div class="panel"><div class="card-title">' + esc(key.toUpperCase()) + '</div><div class="metric-value">' + esc(metric.display) + '</div>' + pill(metric.rating, metric.rating) + '</div>' : "";
@@ -1102,9 +1205,6 @@ function renderHtml(report: StaticReport): string {
     const list = (items) => items?.length ? '<ul>' + items.map((item) => '<li>' + esc(item) + '</li>').join('') + '</ul>' : '<p class="muted">No items recorded.</p>';
     const imgFigure = (label, src) => src ? '<figure><figcaption>' + esc(label) + '</figcaption><img src="' + esc(src) + '" alt="' + esc(label) + ' screenshot" /></figure>' : '<div class="panel muted">No screenshot captured for ' + esc(label) + '.</div>';
     const best = report.variations.find((variant) => variant.id === report.summary.bestVariationId) ?? report.variations[0];
-    const shotFor = (run) => !run ? undefined : (run.screenshotMode === "performance" ? (run.statsScreenshot || run.screenshot) : (run.screenshot || run.statsScreenshot));
-    const baselineShotFor = (run) => (run && run.screenshotMode === "performance") ? (report.baseline.statsScreenshot || report.baseline.screenshot) : (report.baseline.screenshot || report.baseline.statsScreenshot);
-    const shotLabel = (base, run) => base + ((run && run.screenshotMode === "performance") ? " (metrics)" : "");
     const scoreRows = [
       scoreCard("Performance", report.scores.performance),
       scoreCard("Accessibility", report.scores.accessibility),
@@ -1113,9 +1213,25 @@ function renderHtml(report: StaticReport): string {
     ].join('');
     const metricRows = Object.entries(report.baseline.metrics).map(metricCard).join('');
     const issueRows = report.issues.map((issue) => '<div class="item"><div class="item-head"><h3>' + esc(issue.title) + '</h3>' + pill(issue.severity, issue.severity === "critical" ? "poor" : issue.severity) + '</div><p>' + esc(issue.description) + '</p>' + list(issue.evidence) + '<p><strong>Recommendation:</strong> ' + esc(issue.recommendation) + '</p></div>').join('');
-    const suggestionRows = report.suggestions.map((suggestion) => '<div class="item"><div class="item-head"><h3>' + esc(suggestion.title) + '</h3>' + pill(suggestion.priority, suggestion.priority === "critical" ? "poor" : suggestion.priority) + '</div><p><strong>Expected impact:</strong> ' + esc(suggestion.expectedImpact) + '</p><p>' + esc(suggestion.recommendation) + '</p><p class="muted">' + esc(suggestion.implementationNotes) + '</p></div>').join('');
+    const codeBlock = (code) => {
+      if (!code || !code.after) return '';
+      const lang = code.language ? esc(code.language) : 'code';
+      let html = '<div class="code"><div class="code-head"><span class="code-lang">' + lang + '</span><button class="copy" type="button" onclick="copyCode(this)">Copy</button></div>';
+      if (code.before) {
+        html += '<div class="code-tag">Before</div><pre class="before">' + esc(code.before) + '</pre>';
+        html += '<div class="code-tag">After</div>';
+      }
+      html += '<pre data-copy>' + esc(code.after) + '</pre></div>';
+      return html;
+    };
+    const comparisonBlock = (c) => {
+      if (!c || (!c.before && !c.after && !c.metric)) return '';
+      const rows = [['Metric', esc(c.metric || 'Expected')], ['Before', esc(c.before || '—')], ['After (expected)', esc(c.after || '—')]];
+      return '<div class="cmp">' + rows.map((r) => '<div class="cmp-cell"><span class="cmp-label">' + r[0] + '</span><span class="cmp-val">' + r[1] + '</span></div>').join('') + '</div>' + (c.summary ? '<p class="muted" style="margin-top:6px">' + esc(c.summary) + '</p>' : '');
+    };
+    const suggestionRows = report.suggestions.map((suggestion) => '<div class="item"><div class="item-head"><h3>' + esc(suggestion.title) + '</h3>' + pill(suggestion.priority, suggestion.priority === "critical" ? "poor" : suggestion.priority) + '</div><p><strong>Expected impact:</strong> ' + esc(suggestion.expectedImpact) + '</p><p>' + esc(suggestion.recommendation) + '</p>' + (suggestion.implementationNotes ? '<p class="muted">' + esc(suggestion.implementationNotes) + '</p>' : '') + comparisonBlock(suggestion.comparison) + codeBlock(suggestion.code) + '</div>').join('');
     const deltaRows = report.variations.map((variant) => '<tr><td><strong>' + esc(variant.label) + '</strong><br><span class="muted">' + esc(variant.hypothesis) + '</span></td><td>' + variant.deltas.map((delta) => '<span class="delta ' + esc(delta.direction) + '">' + esc(delta.display) + '</span>').join(' ') + '</td><td>' + esc(variant.analysis) + '</td></tr>').join('');
-    const variationDetails = report.variations.map((variant) => '<details><summary>' + esc(variant.label) + '</summary><div class="screens" style="margin-top:12px">' + imgFigure(shotLabel("Original", variant), baselineShotFor(variant)) + imgFigure(shotLabel(variant.label, variant), shotFor(variant)) + '</div><h3 style="margin-top:14px">Applied Changes</h3>' + list(variant.changes.map((change) => change.description + (change.selector ? " (" + change.selector + ")" : ""))) + '</details>').join('');
+    const variationDetails = report.variations.map((variant) => '<details><summary>' + esc(variant.label) + '</summary><div class="screens" style="margin-top:12px">' + imgFigure("Original", report.baseline.screenshot) + imgFigure(variant.label, variant.screenshot) + '</div><h3 style="margin-top:14px">Applied Changes</h3>' + list(variant.changes.map((change) => change.description + (change.selector ? " (" + change.selector + ")" : ""))) + '</details>').join('');
     app.innerHTML = \`
       <header>
         <div class="meta">\${pill(report.summary.verdict, report.summary.verdict === "pass" ? "good" : report.summary.verdict === "fail" ? "poor" : "needs-improvement")}\${pill(report.tool.viewport)}\${pill(new Date(report.createdAt).toLocaleString())}</div>
@@ -1125,7 +1241,7 @@ function renderHtml(report: StaticReport): string {
       </header>
       <section class="grid score-grid">\${scoreRows}</section>
       <section><h2>Core Metrics</h2><div class="grid metric-grid">\${metricRows || '<div class="panel muted">No metrics parsed from this run.</div>'}</div></section>
-      <section class="panel"><h2>Original vs Best Variation</h2><div class="screens">\${imgFigure(shotLabel("Original", best), baselineShotFor(best))}\${imgFigure(shotLabel(best?.label ?? "Variation", best), shotFor(best))}</div></section>
+      <section class="panel"><h2>Original vs Best Variation</h2><p class="muted" style="margin-bottom:12px">Each screenshot includes a Core Web Vitals overlay so you can compare measured metrics alongside the visual result.</p><div class="screens">\${imgFigure("Original", report.baseline.screenshot)}\${imgFigure(best?.label ?? "Variation", best?.screenshot)}</div></section>
       <section class="panel"><h2>Metric Deltas</h2><table><thead><tr><th>Variation</th><th>Deltas</th><th>Analysis</th></tr></thead><tbody>\${deltaRows || '<tr><td colspan="3">No variations tested.</td></tr>'}</tbody></table></section>
       <section class="panel"><h2>Detected Issues</h2><div class="list">\${issueRows || '<p class="muted">No issues returned.</p>'}</div></section>
       <section class="panel"><h2>Suggestions</h2><div class="list">\${suggestionRows || '<p class="muted">No suggestions returned.</p>'}</div></section>
@@ -1143,6 +1259,24 @@ function performanceEntryScript(): string {
   return `() => {
     const navigation = performance.getEntriesByType("navigation")[0];
     const paints = Object.fromEntries(performance.getEntriesByType("paint").map((entry) => [entry.name, Math.round(entry.startTime)]));
+    let lcp;
+    try {
+      const lcpEntries = performance.getEntriesByType("largest-contentful-paint");
+      const lcpEntry = lcpEntries[lcpEntries.length - 1];
+      if (lcpEntry) {
+        lcp = Math.round(lcpEntry.renderTime || lcpEntry.startTime);
+      }
+    } catch (e) {}
+    let cls;
+    try {
+      cls = 0;
+      for (const entry of performance.getEntriesByType("layout-shift")) {
+        if (!entry.hadRecentInput) {
+          cls += entry.value;
+        }
+      }
+      cls = Math.round(cls * 1000) / 1000;
+    } catch (e) {}
     return {
       navigation: navigation ? {
         startTime: Math.round(navigation.startTime),
@@ -1155,6 +1289,8 @@ function performanceEntryScript(): string {
         encodedBodySize: navigation.encodedBodySize
       } : null,
       paints,
+      lcp,
+      cls,
       resourceCount: performance.getEntriesByType("resource").length
     };
   }`;
@@ -1169,17 +1305,6 @@ function wrapScriptAsFunction(script: string): string {
       return { ok: false, error: String(error && error.message ? error.message : error) };
     }
   }`;
-}
-
-// A variation is "visual" when at least one change alters what the page looks like
-// (color, copy, layout, attributes). Pure performance changes (resource hints, script
-// loading) leave the page looking identical, so we feature the metric overlay instead.
-function classifyScreenshotMode(changes: VariantPlan["changes"]): ScreenshotMode {
-  if (changes.length === 0) {
-    return "visual";
-  }
-  const visualTypes = new Set(["css", "attribute", "text", "layout"]);
-  return changes.some((change) => visualTypes.has(change.type)) ? "visual" : "performance";
 }
 
 // Builds an evaluate_script function that paints a fixed DevTools-style Core Web Vitals

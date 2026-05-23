@@ -565,6 +565,12 @@ async function main(): Promise<void> {
   const options = parseArgs(process.argv.slice(2));
   const targetUrl = normalizeUrl(options.url);
 
+  // Default the report workflow to a landscape viewport so screenshots are wide and
+  // zoomed to the above-the-fold area instead of a tall full-page capture.
+  if (options.htmlReport && !options.viewport) {
+    options.viewport = "1366x768";
+  }
+
   const apiKey = process.env.GEMINI_API_KEY ?? process.env.GOOGLE_API_KEY;
   if (!apiKey) {
     throw new Error("Set GEMINI_API_KEY or GOOGLE_API_KEY before running the CLI.");
@@ -623,8 +629,21 @@ async function main(): Promise<void> {
   }
 }
 
+function flushStdout(): Promise<void> {
+  return new Promise((resolveFlush) => {
+    if (process.stdout.writableLength === 0) {
+      resolveFlush();
+      return;
+    }
+    process.stdout.once("drain", () => resolveFlush());
+  });
+}
+
 main()
-  .then(() => {
+  .then(async () => {
+    // The Chrome DevTools MCP child process keeps the event loop alive even after
+    // mcpClient.close(), so exit explicitly. Flush first so piped output isn't truncated.
+    await flushStdout();
     console.error("[remedy] Done. ✅");
     process.exit(0);
   })
