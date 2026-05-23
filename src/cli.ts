@@ -13,6 +13,7 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
+import { generateLocalHtmlReport } from "./local-report.js";
 
 type CliOptions = {
   url?: string;
@@ -25,6 +26,9 @@ type CliOptions = {
   performanceCrux: boolean;
   viewport?: string;
   browserUrl?: string;
+  htmlReport: boolean;
+  reportDir?: string;
+  maxVariants: number;
 };
 
 const MAX_PART_PREVIEW_CHARS = 6000;
@@ -75,7 +79,9 @@ function parseArgs(argv: string[]): CliOptions {
     headless: true,
     isolated: true,
     usageStatistics: false,
-    performanceCrux: false
+    performanceCrux: false,
+    htmlReport: false,
+    maxVariants: 2
   };
 
   for (let i = 0; i < argv.length; i += 1) {
@@ -112,6 +118,17 @@ function parseArgs(argv: string[]): CliOptions {
         break;
       case "--viewport":
         options.viewport = requireValue(arg, next);
+        i += 1;
+        break;
+      case "--html-report":
+        options.htmlReport = true;
+        break;
+      case "--report-dir":
+        options.reportDir = requireValue(arg, next);
+        i += 1;
+        break;
+      case "--max-variants":
+        options.maxVariants = parsePositiveInteger(arg, requireValue(arg, next));
         i += 1;
         break;
       case "--headed":
@@ -160,6 +177,9 @@ Options:
       --browser-url <url>   Connect MCP to an existing debuggable Chrome, e.g. http://127.0.0.1:9222.
       --viewport <size>     Initial Chrome viewport, e.g. 390x844.
       --max-tool-calls <n>   Max Gemini->MCP calls before finalizing. Defaults to 8.
+      --html-report          Generate a local static HTML report with Lighthouse, trace, screenshots, and variants.
+      --report-dir <path>    Directory for local HTML report output. Defaults to reports/<site>-<timestamp>.
+      --max-variants <n>     Number of visual variants to generate/test in --html-report mode. Defaults to 2.
       --headed              Show Chrome instead of running headless.
       --shared-profile      Reuse Chrome DevTools MCP's default profile instead of a temporary profile.
       --usage-statistics    Allow Chrome DevTools MCP usage statistics.
@@ -545,6 +565,12 @@ async function main(): Promise<void> {
   const options = parseArgs(process.argv.slice(2));
   const targetUrl = normalizeUrl(options.url);
 
+  // Default the report workflow to a landscape viewport so screenshots are wide and
+  // zoomed to the above-the-fold area instead of a tall full-page capture.
+  if (options.htmlReport && !options.viewport) {
+    options.viewport = "1366x768";
+  }
+
   const apiKey = process.env.GEMINI_API_KEY ?? process.env.GOOGLE_API_KEY;
   if (!apiKey) {
     throw new Error("Set GEMINI_API_KEY or GOOGLE_API_KEY before running the CLI.");
@@ -567,6 +593,23 @@ async function main(): Promise<void> {
   await mcpClient.connect(transport);
 
   try {
+    if (options.htmlReport) {
+      console.error("[remedy] Running deterministic Lighthouse + trace + screenshot report workflow");
+      const result = await generateLocalHtmlReport({
+        client: mcpClient,
+        ai,
+        model: options.model,
+        targetUrl,
+        outputDir: options.reportDir,
+        viewport: options.viewport,
+        maxVariants: options.maxVariants
+      });
+      console.log(`Local HTML report written to ${result.htmlPath}`);
+      console.log(`Report JSON written to ${result.jsonPath}`);
+      console.log(`Artifacts directory: ${result.outputDir}`);
+      return;
+    }
+
     console.error(`[remedy] Asking ${options.model} to evaluate ${targetUrl}`);
     const response = await ai.models.generateContent({
       model: options.model,
@@ -586,8 +629,26 @@ async function main(): Promise<void> {
   }
 }
 
-main().catch((error: unknown) => {
-  const message = error instanceof Error ? error.message : String(error);
-  console.error(`[remedy] ${message}`);
-  process.exit(1);
-});
+function flushStdout(): Promise<void> {
+  return new Promise((resolveFlush) => {
+    if (process.stdout.writableLength === 0) {
+      resolveFlush();
+      return;
+    }
+    process.stdout.once("drain", () => resolveFlush());
+  });
+}
+
+main()
+  .then(async () => {
+    // The Chrome DevTools MCP child process keeps the event loop alive even after
+    // mcpClient.close(), so exit explicitly. Flush first so piped output isn't truncated.
+    await flushStdout();
+    console.error("[remedy] Done. ✅");
+    process.exit(0);
+  })
+  .catch((error: unknown) => {
+    const message = error instanceof Error ? error.message : String(error);
+    console.error(`[remedy] ${message}`);
+    process.exit(1);
+  });

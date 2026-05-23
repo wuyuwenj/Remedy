@@ -18,6 +18,9 @@ This is a good first hackathon slice because it gives us an interactive CLI now 
 - The JavaScript SDK supports MCP by importing `mcpToTool` from `@google/genai` and passing `tools: [mcpToTool(client)]`.
 - Chrome DevTools MCP is started with `npx -y chrome-devtools-mcp@latest`.
 - Chrome DevTools MCP requires Node.js 20.19+ or a newer maintenance LTS, current stable Chrome or newer, and npm.
+- Chrome DevTools MCP exposes `lighthouse_audit`, but the tool reference says it excludes performance. Use it for accessibility, SEO, best practices, and agentic browsing context.
+- Performance should come from `performance_start_trace` / `performance_stop_trace`; call `performance_analyze_insight` only for specific insight names and insight-set IDs returned by a trace.
+- `trace.json.gz` is the compressed raw Chrome trace artifact. MCP may write it as `trace.json.json.gz` when the requested filename already ends in `.json.gz`.
 - The DevTools MCP tools we need for Site Doctor include:
   - `navigate_page`
   - `new_page`
@@ -41,6 +44,13 @@ The CLI in `src/cli.ts`:
 4. Sends Gemini 3.5 Flash a bounded Site Doctor prompt with the MCP tools available.
 5. Prints Gemini's Markdown evaluation.
 
+The local HTML report mode:
+
+1. Runs deterministic MCP collection instead of waiting for Gemini to choose tools.
+2. Captures screenshots, snapshots, Lighthouse output, DevTools trace output, network data, console data, and Performance API data.
+3. Sends that evidence to Gemini for structured issues, suggestions, and safe variants.
+4. Applies each variant, captures another screenshot, reruns trace collection, compares metric deltas, and writes `index.html` plus `report.json`.
+
 Run it with:
 
 ```bash
@@ -55,6 +65,7 @@ Useful variants:
 npm run dev -- https://example.com --prompt "Focus on image loading and LCP"
 npm run dev -- https://example.com --headed
 npm run dev -- https://example.com --browser-url http://127.0.0.1:9222
+npm run dev -- https://example.com --html-report --max-variants 2
 ```
 
 ## Caveats
