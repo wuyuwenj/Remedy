@@ -120,6 +120,76 @@ body {
   text-overflow: ellipsis;
 }
 
+/* ================= Question Input ================= */
+.question-section {
+  padding: 0 16px 12px;
+}
+
+.question-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--text-muted);
+  cursor: pointer;
+  padding: 6px 0;
+  transition: color 0.15s ease;
+}
+
+.question-toggle:hover {
+  color: var(--text-main);
+}
+
+.question-chevron {
+  margin-left: auto;
+  transition: transform 0.2s ease;
+}
+
+.question-chevron.open {
+  transform: rotate(180deg);
+}
+
+.question-input-wrapper {
+  margin-top: 6px;
+}
+
+.question-input {
+  width: 100%;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  border-radius: 6px;
+  padding: 8px 10px;
+  color: var(--text-main);
+  font-family: var(--font-sans);
+  font-size: 12px;
+  line-height: 1.4;
+  resize: vertical;
+  min-height: 40px;
+  max-height: 100px;
+  transition: border-color 0.15s ease;
+}
+
+.question-input::placeholder {
+  color: var(--text-dark);
+}
+
+.question-input:focus {
+  outline: none;
+  border-color: rgba(99, 102, 241, 0.5);
+}
+
+/* ================= Answer Section ================= */
+.answer-content {
+  background: var(--bg-surface);
+  border: 1px solid rgba(99, 102, 241, 0.25);
+  border-left: 2px solid #6366f1;
+  border-radius: 6px;
+  padding: 12px;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--text-main);
+}
+
 /* ================= Sections Layout ================= */
 .section {
   padding: 16px;

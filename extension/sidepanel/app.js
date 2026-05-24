@@ -17,6 +17,8 @@ const state = {
   activeFixes: new Set(),
   lighthouseBefore: null,
   lighthouseAfter: null,
+  question: '',
+  answer: null,
   error: null,
   eventSource: null,
 };
@@ -45,6 +47,12 @@ const els = {
   errorSection:   document.getElementById('error-section'),
   errorMessage:   document.getElementById('error-message'),
   retryBtn:       document.getElementById('retry-btn'),
+  questionToggle: document.getElementById('question-toggle'),
+  questionChevron:document.getElementById('question-chevron'),
+  questionWrapper:document.getElementById('question-wrapper'),
+  questionInput:  document.getElementById('question-input'),
+  answerSection:  document.getElementById('answer-section'),
+  answerContent:  document.getElementById('answer-content'),
 };
 
 // ---- Init ----
@@ -69,6 +77,14 @@ function init() {
   els.clearFixesBtn.addEventListener('click', clearAllFixes);
   els.retryBtn.addEventListener('click', startAnalysis);
   els.exportAllBtn.addEventListener('click', () => copyToClipboard(generateFullReport(), els.exportAllBtn));
+
+  els.questionToggle.addEventListener('click', () => {
+    els.questionWrapper.classList.toggle('hidden');
+    els.questionChevron.classList.toggle('open');
+    if (!els.questionWrapper.classList.contains('hidden')) {
+      els.questionInput.focus();
+    }
+  });
 }
 
 // ---- Analysis Flow ----
@@ -82,11 +98,14 @@ async function startAnalysis() {
 
   try {
     // Step 1: POST /analyze
+    state.question = (els.questionInput.value || '').trim();
     addLog('Sending URL to Remedy API...', 'step');
+    const body = { url: state.url };
+    if (state.question) body.question = state.question;
     const res = await fetch(`${API_URL}/analyze`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ url: state.url }),
+      body: JSON.stringify(body),
     });
 
     if (!res.ok) {
@@ -167,6 +186,11 @@ function handleEvent(event) {
         state.lighthouseAfter = data.score;
       }
       renderLighthouse();
+      break;
+
+    case 'answer':
+      state.answer = data;
+      renderAnswer();
       break;
 
     case 'metrics':
@@ -433,6 +457,12 @@ function renderMetric(name, value, unit) {
     <div class="metric-name">${name}</div>
     <div class="metric-value">${formatted}<span class="metric-unit">${unit}</span></div>`;
   return card;
+}
+
+function renderAnswer() {
+  if (!state.answer) return;
+  els.answerContent.textContent = state.answer;
+  showSection(els.answerSection);
 }
 
 function renderLighthouse() {
@@ -757,12 +787,14 @@ function resetUI() {
   state.activeFixes.clear();
   state.lighthouseBefore = null;
   state.lighthouseAfter = null;
+  state.answer = null;
   state.error = null;
   state.reportId = null;
 
   els.agentLog.innerHTML = '';
   els.lighthouseSection.innerHTML = '';
   els.lighthouseSection.classList.add('hidden');
+  els.answerContent.textContent = '';
   els.metricsGrid.innerHTML = '';
   els.suggestionsList.innerHTML = '';
   els.optimizationList.innerHTML = '';
@@ -773,6 +805,7 @@ function resetUI() {
   state.activeFixes.clear();
 
   hideSection(els.agentLogSection);
+  hideSection(els.answerSection);
   hideSection(els.metricsSection);
   hideSection(els.suggestionsSection);
   hideSection(els.optimizationSection);

@@ -42,6 +42,24 @@
     </div>
   </section>
 
+  <!-- Question Input -->
+  <section class="question-section">
+    <div class="question-toggle" id="question-toggle">
+      <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+        <circle cx="7" cy="7" r="5.5" stroke="#6366f1" stroke-width="1.2"/>
+        <path d="M5.5 5.5a1.5 1.5 0 112.12 1.37c-.42.24-.62.56-.62.88V8.5" stroke="#6366f1" stroke-width="1.2" stroke-linecap="round"/>
+        <circle cx="7" cy="10" r="0.5" fill="#6366f1"/>
+      </svg>
+      <span>Ask a question about this page</span>
+      <svg class="question-chevron" id="question-chevron" width="12" height="12" viewBox="0 0 12 12" fill="none">
+        <path d="M3 4.5l3 3 3-3" stroke="#71717a" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/>
+      </svg>
+    </div>
+    <div class="question-input-wrapper hidden" id="question-wrapper">
+      <textarea id="question-input" class="question-input" rows="2" placeholder="e.g. Why is this page so slow? What's causing layout shifts?"></textarea>
+    </div>
+  </section>
+
   <!-- Analyze Button -->
   <section class="action-section">
     <button id="analyze-btn" class="btn-primary" disabled>
@@ -63,6 +81,19 @@
       <span id="agent-status" class="status-badge">idle</span>
     </div>
     <div id="agent-log" class="agent-log"></div>
+  </section>
+
+  <!-- Answer -->
+  <section id="answer-section" class="section hidden">
+    <div class="section-header">
+      <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+        <circle cx="8" cy="8" r="6" stroke="#6366f1" stroke-width="1.3"/>
+        <path d="M6 6a2 2 0 112.83 1.83c-.56.32-.83.75-.83 1.17V10" stroke="#6366f1" stroke-width="1.3" stroke-linecap="round"/>
+        <circle cx="8" cy="12" r="0.6" fill="#6366f1"/>
+      </svg>
+      <h2>Answer</h2>
+    </div>
+    <div id="answer-content" class="answer-content"></div>
   </section>
 
   <!-- Baseline Metrics -->

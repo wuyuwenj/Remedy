@@ -15,10 +15,13 @@ const PERFORMANCE_PROMPT = `You are Remedy, an autonomous frontend and web perfo
 Return a JSON object with a frontend/performance comparison and up to 5 optimization suggestions, ranked by expected impact on Core Web Vitals and user experience.
 Include visible UI/component analysis whenever evidence supports it: navigation/header, footer, hero area, CTAs/buttons, images/media, text contrast, spacing, sticky elements, layout shifts, and color/style changes that users can actually see.
 
+If the user has asked a question, include an "answer" field in the report object that directly answers their question using the trace/network evidence. Keep the answer concise (2-4 sentences) and grounded in the data.
+
 Required shape:
 {
   "report": {
     "summary": "One paragraph verdict comparing the current page with a fast production baseline.",
+    "answer": "(Optional) Direct answer to the user's question, if one was provided.",
     "frontendComparison": ["Specific visible UI/layout/content observations. Name the visible component if possible, e.g. navbar, hero CTA, card grid, footer, image/media, form, button color, spacing, sticky element."],
     "performanceComparison": ["Trace/network-backed performance observations."],
     "improveNext": ["Concrete elements, resources, or implementation areas to improve."],
@@ -67,12 +70,17 @@ Rules:
 export async function analyzePerformance(
   traceData: any,
   networkData: any,
-  url: string
+  url: string,
+  question?: string
 ): Promise<{ report: AnalysisReport; suggestions: Suggestion[] }> {
+  const questionBlock = question
+    ? `\n=== USER QUESTION ===\n${question}\n\nAnswer this question in the report.answer field using the trace/network evidence.\n`
+    : '';
+
   const fullPrompt = `${PERFORMANCE_PROMPT}
 
 URL: ${url}
-
+${questionBlock}
 === TRACE DATA ===
 ${typeof traceData === 'string' ? traceData : JSON.stringify(traceData, null, 2)}
 
@@ -158,7 +166,7 @@ function extractResponseText(response: any): string {
 }
 
 function normalizeReport(value: any): AnalysisReport {
-  return {
+  const report: AnalysisReport = {
     summary: value?.summary || 'Gemini returned optimization suggestions but no summary.',
     frontendComparison: toStringArray(value?.frontendComparison),
     performanceComparison: toStringArray(value?.performanceComparison),
@@ -166,6 +174,10 @@ function normalizeReport(value: any): AnalysisReport {
     goodEnough: toStringArray(value?.goodEnough),
     missingEvidence: toStringArray(value?.missingEvidence),
   };
+  if (typeof value?.answer === 'string' && value.answer.trim()) {
+    report.answer = value.answer.trim();
+  }
+  return report;
 }
 
 function toStringArray(value: unknown): string[] {

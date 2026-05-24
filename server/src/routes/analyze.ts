@@ -10,7 +10,7 @@ import { saveReport } from '../db/supabase.js';
 const router = Router();
 
 router.post('/analyze', async (req: Request, res: Response) => {
-  const { url } = req.body;
+  const { url, question } = req.body;
 
   // Basic URL validation
   if (!url || typeof url !== 'string') {
@@ -47,7 +47,8 @@ router.post('/analyze', async (req: Request, res: Response) => {
       session.status = 'analyzing';
       emit({ type: 'status', data: 'Analysis started...' });
 
-      const { baseline, suggestions, mcpClient } = await runBaseline(reportId, url, emit);
+      const userQuestion = typeof question === 'string' ? question.trim() : '';
+      const { baseline, suggestions, mcpClient } = await runBaseline(reportId, url, emit, userQuestion);
 
       session.baseline = baseline;
       session.suggestions = suggestions;

@@ -333,7 +333,8 @@ function parseLighthouseScore(result: any): number | undefined {
 export async function runBaseline(
   sessionId: string,
   url: string,
-  emit: Emit
+  emit: Emit,
+  question?: string
 ): Promise<{ baseline: BaselineResult; suggestions: Suggestion[]; mcpClient: Client }> {
   setToolCallLogger((tool, args) => {
     const detail = tool === 'navigate_page' ? ` → ${args.url}` : '';
@@ -412,10 +413,14 @@ export async function runBaseline(
     emit({ type: 'status', data: 'Sending trace + network data to Gemini for analysis...' });
 
     logStep('Baseline', sessionId, 'calling Gemini for analysis...');
-    const { report, suggestions } = await analyzePerformance(traceText, networkText, url);
+    const { report, suggestions } = await analyzePerformance(traceText, networkText, url, question);
     baseline.report = report;
     logStep('Baseline', sessionId, `Gemini returned ${suggestions.length} suggestions`);
     emit({ type: 'status', data: `Gemini returned ${suggestions.length} suggestion(s).` });
+
+    if (report.answer) {
+      emit({ type: 'answer', data: report.answer });
+    }
 
     emit({ type: 'suggestions', data: suggestions });
 

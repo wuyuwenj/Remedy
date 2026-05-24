@@ -23,6 +23,7 @@ export interface BaselineResult {
 
 export interface AnalysisReport {
   summary: string;
+  answer?: string;
   frontendComparison: string[];
   performanceComparison: string[];
   improveNext: string[];
@@ -57,6 +58,6 @@ export interface OptimizationResult {
 export interface SSEEvent {
   // 'done' signals the baseline phase finished (metrics + suggestions ready,
   // awaiting fix selection); 'complete' signals the optimization phase finished.
-  type: 'status' | 'baseline' | 'lighthouse' | 'suggestions' | 'optimization' | 'done' | 'complete' | 'error';
+  type: 'status' | 'baseline' | 'lighthouse' | 'suggestions' | 'answer' | 'optimization' | 'done' | 'complete' | 'error';
   data: any;
 }
